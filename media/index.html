@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src 'nonce-{{nonce}}'; img-src {{cspSource}};">
+  <link rel="stylesheet" href="{{styleUri}}">
+  <title>Codex 会话树</title>
+</head>
+<body>
+  <header>
+    <div class="heading"><div><div class="eyebrow">CODEX / SESSIONS</div><h1>会话关系树</h1></div><button id="expand" class="icon" title="在编辑区打开关系图" aria-label="在编辑区打开关系图">↗</button></div>
+    <p class="intro">沿着分支继续思考。点击节点，回到对应会话。</p>
+    <div class="search-row"><input id="search" type="search" placeholder="搜索主题、模型或会话 ID" aria-label="搜索会话"><button id="refresh" class="icon" aria-label="刷新会话" title="刷新">↻</button></div>
+    <div class="tabs" role="group" aria-label="显示范围"><button id="branches" class="tab active" aria-pressed="true">分支家族</button><button id="all" class="tab" aria-pressed="false">全部会话</button></div>
+    <div class="filters"><label><input id="workspace" type="checkbox">当前项目</label><label><input id="archived" type="checkbox">已归档</label><label><input id="agents" type="checkbox">子代理</label></div>
+  </header>
+  <div id="error" role="alert" hidden></div>
+  <div class="summary"><span id="count" aria-live="polite">正在读取会话…</span><span id="status"></span></div>
+  <main id="forest" aria-label="会话分支关系"></main>
+  <div id="empty" hidden><div class="empty-icon">⑂</div><h2>暂无匹配的会话家族</h2><p>试试切换到全部会话，或调整搜索和筛选条件。</p><button id="showAll">查看全部会话</button></div>
+  <footer>悬停查看主题、模型与推理强度 · 自动刷新 <button id="settings">设置</button></footer>
+  <aside id="tooltip" role="tooltip" hidden></aside>
+  <script nonce="{{nonce}}" src="{{graphUri}}"></script>
+  <script nonce="{{nonce}}" src="{{appUri}}"></script>
+</body>
+</html>

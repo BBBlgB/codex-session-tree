@@ -1,0 +1,11 @@
+node_modules/
+artifacts/
+*.vsix
+__pycache__/
+.vscode-test/
+VALIDATION.md
+*.log
+*.sqlite*
+*.jsonl
+.env
+.env.*

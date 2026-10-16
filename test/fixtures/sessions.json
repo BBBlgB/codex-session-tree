@@ -1,0 +1,34 @@
+{
+  "nodes": [
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "title": "示例：设计讨论",
+      "cwd": "/example/project",
+      "model": "example-model",
+      "effort": "medium",
+      "createdAt": 1735689600000,
+      "updatedAt": 1735689600000,
+      "parentId": null,
+      "relation": "root",
+      "archived": false,
+      "isAgent": false,
+      "available": true
+    },
+    {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "title": "示例：实现方案 A",
+      "cwd": "/example/project",
+      "model": "example-model",
+      "effort": "high",
+      "createdAt": 1735776000000,
+      "updatedAt": 1735776000000,
+      "parentId": "11111111-1111-4111-8111-111111111111",
+      "relation": "fork",
+      "archived": false,
+      "isAgent": false,
+      "available": true
+    }
+  ],
+  "warnings": [],
+  "scannedAt": 1735776000000
+}
