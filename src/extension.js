@@ -7,6 +7,7 @@ const crypto = require('node:crypto');
 const { execFile } = require('node:child_process');
 const { openSession } = require('./navigation');
 const { resolveRuntime, describeEnvironment } = require('./runtime');
+const { annotateSnapshot, writeAnnotation } = require('./annotations');
 
 function scan(extensionPath) {
   const config = vscode.workspace.getConfiguration('codexSessionTree');
@@ -52,7 +53,7 @@ function activate(context) {
     if (!force && ![...surfaces].some(s => s.visible)) return;
     pending = (async () => {
       try {
-        snapshot = await scan(context.extensionPath);
+        snapshot = annotateSnapshot(context.globalState, await scan(context.extensionPath));
         const workspacePaths = (vscode.workspace.workspaceFolders || []).map(folder => folder.uri.fsPath);
         send({ type: 'data', ...snapshot, selectedId, workspacePaths });
       } catch (error) {
@@ -73,6 +74,18 @@ function activate(context) {
         if (message.type === 'ready' || message.type === 'refresh') await refresh(true);
         else if (message.type === 'openPanel') await vscode.commands.executeCommand('codexSessionTree.openHere');
         else if (message.type === 'settings') await vscode.commands.executeCommand('codexSessionTree.settings');
+        else if (message.type === 'saveAnnotation') {
+          const item = snapshot?.nodes.find(node => node.id === message.id);
+          // Keep a form bound to the data source it was opened from, even if
+          // the user changes codexHome while the editor remains open.
+          if (!item || message.dataHome !== snapshot.environment.dataHome) throw new Error('会话数据来源已变化，请关闭编辑框并重新打开。');
+          const annotation = await writeAnnotation(context.globalState, snapshot.environment, item.id, message.annotation);
+          // An automatic scan may have replaced the snapshot during persistence.
+          if (snapshot?.environment.dataHome === message.dataHome) snapshot = annotateSnapshot(context.globalState, snapshot);
+          for (const target of surfaces) void target.webview.postMessage({
+            type: target === surface ? 'annotationSaved' : 'annotationUpdated', id: item.id, annotation, dataHome: message.dataHome
+          });
+        }
         else if (message.type === 'open' && typeof message.id === 'string') {
           const item = snapshot?.nodes.find(node => node.id === message.id);
           const uri = await openSession(vscode, item);
@@ -81,7 +94,10 @@ function activate(context) {
           send({ type: 'selected', id: selectedId });
           output.appendLine(`已请求 Codex 打开会话：${uri}`);
         }
-      } catch (error) { report(error); }
+      } catch (error) {
+        if (message?.type === 'saveAnnotation') void surface.webview.postMessage({ type: 'annotationError', id: message.id, message: error.message });
+        else report(error);
+      }
     });
     surface.onDidDispose(() => { surfaces.delete(surface); receiver.dispose(); });
     surface.webview.html = getHtml(surface.webview, context.extensionUri);

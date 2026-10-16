@@ -12,7 +12,7 @@
     <div class="heading"><div><div class="eyebrow">CODEX / SESSIONS</div><h1>会话关系树</h1></div><button id="expand" class="icon" title="在此窗口的编辑区打开关系图" aria-label="在此窗口的编辑区打开关系图">↗</button></div>
     <p class="intro">沿着分支继续思考。点击节点，回到对应会话。</p>
     <div id="environment" class="environment" aria-label="会话数据来源" hidden><div id="environment-label"></div><div id="environment-workspace"></div><div id="environment-home"></div></div>
-    <div class="search-row"><input id="search" type="search" placeholder="搜索主题、模型或会话 ID" aria-label="搜索会话"><button id="refresh" class="icon" aria-label="刷新会话" title="刷新">↻</button></div>
+    <div class="search-row"><input id="search" type="search" placeholder="搜索主题、别名、标签或备注" aria-label="搜索会话"><button id="refresh" class="icon" aria-label="刷新会话" title="刷新">↻</button></div>
     <div class="tabs" role="group" aria-label="显示范围"><button id="branches" class="tab active" aria-pressed="true">分支家族</button><button id="all" class="tab" aria-pressed="false">全部会话</button></div>
     <div class="filters"><label><input id="workspace" type="checkbox">当前项目</label><label><input id="archived" type="checkbox">已归档</label><label><input id="agents" type="checkbox">子代理</label></div>
   </header>
@@ -22,6 +22,24 @@
   <div id="empty" hidden><div class="empty-icon">⑂</div><h2>暂无匹配的会话家族</h2><p>试试切换到全部会话，或调整搜索和筛选条件。</p><button id="showAll">查看全部会话</button></div>
   <footer>悬停查看主题、模型与推理强度 · 自动刷新 <button id="settings">设置</button></footer>
   <aside id="tooltip" role="tooltip" hidden></aside>
+  <dialog id="annotation-editor" aria-labelledby="editor-title">
+    <form id="annotation-form">
+      <div class="editor-heading"><h2 id="editor-title">编辑节点信息</h2><button id="editor-close" type="button" class="icon" aria-label="关闭编辑">×</button></div>
+      <div class="editor-original"><span>原主题</span><p id="editor-original-title"></p></div>
+      <label for="node-alias">别名</label>
+      <input id="node-alias" type="text" maxlength="120" placeholder="留空时显示原主题" autocomplete="off">
+      <fieldset><legend>标签（可多选）</legend><div class="tag-options">
+        <label><input type="checkbox" name="node-tag" value="进行中">进行中</label>
+        <label><input type="checkbox" name="node-tag" value="已完成">已完成</label>
+        <label><input type="checkbox" name="node-tag" value="待验证">待验证</label>
+      </div></fieldset>
+      <label for="node-note">备注</label>
+      <textarea id="node-note" rows="5" maxlength="6000" placeholder="记录这个分支的用途、结论或待办"></textarea>
+      <p class="editor-hint">保存到会话树插件，重新打开后保留。</p>
+      <p id="editor-error" role="alert" hidden></p>
+      <div class="editor-actions"><button id="editor-clear" type="button">清空字段</button><span></span><button id="editor-cancel" type="button">取消</button><button id="editor-save" type="submit" class="primary">保存</button></div>
+    </form>
+  </dialog>
   <script nonce="{{nonce}}" src="{{graphUri}}"></script>
   <script nonce="{{nonce}}" src="{{appUri}}"></script>
 </body>

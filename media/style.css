@@ -10,10 +10,10 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; color: var(--fg); background: var(--bg); font-family: var(--vscode-font-family, system-ui, sans-serif); font-size: var(--vscode-font-size, 13px); }
-button,input { font: inherit; }
+button,input,textarea { font: inherit; }
 button { cursor: pointer; color: var(--fg); border: 1px solid var(--line); background: transparent; border-radius: 6px; padding: 6px 10px; }
 button:hover { background: var(--vscode-list-hoverBackground, #253448); }
-button:focus-visible,input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+button:focus-visible,input:focus-visible,textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 button:disabled { cursor: default; opacity: .6; }
 header { padding: 22px 22px 14px; border-bottom: 1px solid var(--line); }
 .heading { display: flex; align-items: center; justify-content: space-between; }
@@ -51,7 +51,14 @@ h1 { font-size: 22px; letter-spacing: -.4px; margin: 6px 0 0; font-weight: 600; 
 .node:hover { border-color: var(--accent); background: var(--vscode-list-hoverBackground, #203243); }
 .node.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .node.context { border-style: dashed; opacity: .65; }
-.node-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.5; font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
+.node-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.5; font-size: 12px; font-weight: 500; overflow-wrap: anywhere; padding-right: 24px; }
+.node-edit { position: absolute; top: 7px; right: 7px; width: 24px; height: 24px; padding: 0; border: 0; z-index: 3; color: var(--muted); font-size: 17px; }
+.node-edit:hover { color: var(--accent); }
+.node-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.node-tag { border-radius: 4px; padding: 2px 6px; font-size: 10px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.node-tag[data-tag="已完成"] { color: var(--vscode-testing-iconPassed, #78c998); background: color-mix(in srgb, var(--vscode-testing-iconPassed, #78c998) 12%, transparent); }
+.node-tag[data-tag="待验证"] { color: var(--vscode-editorWarning-foreground, #dbb56e); background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #dbb56e) 12%, transparent); }
+.node-note-icon { margin-left: auto; }
 .node-meta { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--muted); flex-wrap: wrap; }
 .node-kind { color: var(--accent); }
 .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); display: inline-block; }
@@ -63,6 +70,26 @@ h1 { font-size: 22px; letter-spacing: -.4px; margin: 6px 0 0; font-weight: 600; 
 .tooltip-label { color: var(--muted); width: 52px; flex-shrink: 0; }
 .tooltip-value { overflow-wrap: anywhere; min-width: 0; }
 .tooltip-note { color: var(--muted); font-size: 10px; line-height: 1.7; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.tooltip-annotation { white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+#annotation-editor { color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 20px; width: 440px; max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); overflow: auto; box-shadow: 0 15px 45px #0006; }
+#annotation-editor::backdrop { background: #0007; }
+.editor-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.editor-heading h2 { font-size: 16px; font-weight: 600; margin: 0; }
+.editor-original { font-size: 11px; color: var(--muted); margin-bottom: 16px; }
+.editor-original p { margin: 5px 0 0; max-height: 64px; overflow: auto; overflow-wrap: anywhere; line-height: 1.6; white-space: pre-wrap; }
+#annotation-form > label, #annotation-form legend { display: block; font-size: 12px; margin-bottom: 7px; }
+#node-alias,#node-note { display: block; width: 100%; color: var(--vscode-input-foreground, var(--fg)); background: var(--vscode-input-background, var(--bg)); border: 1px solid var(--vscode-input-border, var(--line)); border-radius: 5px; padding: 8px 10px; }
+#node-note { resize: vertical; line-height: 1.6; min-height: 90px; }
+#annotation-form fieldset { padding: 0; margin: 18px 0; border: 0; }
+.tag-options { display: flex; flex-wrap: wrap; gap: 12px; }
+.tag-options label { display: flex; align-items: center; gap: 5px; font-size: 12px; }
+.tag-options input { accent-color: var(--accent); margin: 0; }
+.editor-hint { font-size: 11px; color: var(--muted); margin: 12px 0 18px; line-height: 1.6; }
+#editor-error { color: var(--vscode-errorForeground, #f88); font-size: 12px; overflow-wrap: anywhere; }
+.editor-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.editor-actions span { flex: 1; }
+.primary { color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, #28669c); border-color: transparent; }
+.primary:hover { background: var(--vscode-button-hoverBackground, #347aad); }
 #error { margin: 14px 22px 0; border-left: 3px solid var(--vscode-errorForeground, #f88); padding: 10px; background: var(--vscode-inputValidation-errorBackground, #512c30); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
 #empty { text-align: center; padding: 35px 20px; color: var(--muted); line-height: 1.8; }
 #empty h2 { color: var(--fg); font-size: 15px; font-weight: 500; }
@@ -78,7 +105,6 @@ footer button { font-size: 10px; padding: 0 3px; border: 0; color: var(--accent)
   .scene { width: auto; min-width: 0; } .branch { display: block; }
   .children { margin: 12px 0 0 16px; gap: 12px; }
   .node { width: 100%; min-width: 135px; min-height: 66px; padding: 10px 12px; }
-  .node-wrap { width: 100%; } .collapse { right: 8px; top: 8px; background: var(--card); }
-  .node.has-children .node-title { padding-right: 22px; }
+  .node-wrap { width: 100%; } .collapse { right: -8px; top: calc(100% - 11px); background: var(--card); }
   .family-heading { padding: 10px; } footer { padding: 0 14px 15px; }
 }

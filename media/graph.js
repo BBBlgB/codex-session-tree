@@ -41,7 +41,8 @@
     function finish(item) {
       item.children.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
       item.size = 1; item.latest = item.updatedAt || 0;
-      item.matches = !query || [item.title, item.model, item.effort, item.cwd, item.id].some(x => String(x || '').toLowerCase().includes(query));
+      const annotation = item.annotation || {};
+      item.matches = !query || [item.title, item.model, item.effort, item.cwd, item.id, annotation.alias, annotation.note, ...(annotation.tags || [])].some(x => String(x || '').toLowerCase().includes(query));
       for (const child of item.children) {
         finish(child); item.size += child.size; item.latest = Math.max(item.latest, child.latest); item.matches ||= child.matches;
       }

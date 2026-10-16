@@ -25,6 +25,14 @@ test('workspace matching handles Windows extended path prefixes', () => {
 test('cycles cannot hide nodes or cause unbounded traversal', () => {
   assert.equal(buildForest([{ ...a, parentId: 'B' }, b]).length, 2);
 });
+test('alias, tags, and multiline notes participate in search while retaining the original title', () => {
+  const nodes = [a, { ...b, annotation: { alias: '别名方案', tags: ['待验证'], note: '笔记\n边界条件' } }];
+  for (const query of ['别名方案', '待验证', '边界条件', 'child']) {
+    const roots = buildForest(nodes, { branches: true, query });
+    assert.equal(roots.length, 1); assert.equal(roots[0].children[0].id, 'B');
+    assert.equal(roots[0].children[0].title, 'child');
+  }
+});
 test('navigation resolves and preserves the target window before opening Codex', async () => {
   const calls = [];
   const resolved = { path: `/local/${id}`, query: 'windowId=target-window', toString: () => `vscode-insiders://openai.chatgpt/local/${id}?windowId=target-window` };

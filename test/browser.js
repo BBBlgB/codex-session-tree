@@ -14,7 +14,19 @@ async function run() {
     if (!['index.html', 'style.css', 'graph.js', 'app.js', 'bridge.js'].includes(name)) { response.writeHead(404); response.end(); return; }
     response.setHeader('Content-Type', name.endsWith('.css') ? 'text/css' : name.endsWith('.js') ? 'text/javascript' : 'text/html');
     if (name === 'bridge.js') {
-      response.end(`window.messages=[];window.acquireVsCodeApi=()=>({getState:()=>({}),setState:()=>{},postMessage:m=>{window.messages.push(m);if(m.type==='ready')setTimeout(()=>window.postMessage(${JSON.stringify({ type: 'data', ...data, workspacePaths: ['/example/project'] })},'*'),10)}});`); return;
+      response.end(`
+        window.messages=[];
+        const fixture=${JSON.stringify({ type: 'data', ...data, workspacePaths: ['/example/project'] })};
+        window.acquireVsCodeApi=()=>({getState:()=>({}),setState:()=>{},postMessage:m=>{
+          window.messages.push(m);
+          if(m.type==='ready')setTimeout(()=>window.postMessage({...fixture,nodes:fixture.nodes.map(n=>({...n,annotation:JSON.parse(localStorage.getItem(n.id)||'null')}))},'*'),10);
+          if(m.type==='saveAnnotation')setTimeout(()=>{
+            if(window.rejectSave){window.postMessage({type:'annotationError',id:m.id,message:'模拟存储失败'},'*');return;}
+            localStorage.setItem(m.id,JSON.stringify(m.annotation));
+            window.postMessage({type:'annotationSaved',id:m.id,annotation:m.annotation,dataHome:m.dataHome},'*');
+          },10);
+        }});
+      `); return;
     }
     let body = fs.readFileSync(path.join(root, 'media', name), 'utf8');
     if (name === 'index.html') body = body.replaceAll('{{cspSource}}', "'self'").replaceAll('{{nonce}}', 'test-nonce').replaceAll('{{styleUri}}', '/style.css')
@@ -59,6 +71,63 @@ async function run() {
     const box = await page.locator('#tooltip').boundingBox();
     assert.ok(box.x >= 0 && box.x + box.width <= 340);
     await page.screenshot({ path: path.join(root, 'artifacts/demo-sidebar.png') });
+    const edit = page.locator(`.node-edit[data-id="${child.id}"]`);
+    const openCount = await page.evaluate(() => window.messages.filter(m => m.type === 'open').length);
+    await edit.click();
+    assert.equal(await page.locator('#annotation-editor').isVisible(), true);
+    assert.equal(await page.evaluate(() => window.messages.filter(m => m.type === 'open').length), openCount);
+    assert.equal(await page.locator('#editor-original-title').innerText(), child.title);
+    await page.locator('#node-alias').fill('方案 A · 等待评审');
+    await page.locator('[name="node-tag"][value="进行中"]').check();
+    await page.locator('[name="node-tag"][value="待验证"]').check();
+    await page.locator('#node-note').fill('用于讨论接口。\n核对边界条件后再继续。');
+    // An automatic scan must not erase a form being edited.
+    await page.evaluate(snapshot => window.postMessage({ type: 'data', ...snapshot }, '*'), data);
+    assert.equal(await page.locator('#node-alias').inputValue(), '方案 A · 等待评审');
+    // Updates from the other view may refresh the graph, but never close or
+    // replace this view's unsaved draft for the same node.
+    await page.evaluate(({ id, dataHome }) => window.postMessage({ type: 'annotationUpdated', id, dataHome,
+      annotation: { alias: '另一个视图保存的别名', tags: ['已完成'], note: '另一份备注' } }, '*'), { id: child.id, dataHome: data.environment.dataHome });
+    assert.equal(await page.locator('#annotation-editor').isVisible(), true);
+    assert.equal(await page.locator('#node-alias').inputValue(), '方案 A · 等待评审');
+    const editorBox = await page.locator('#annotation-editor').boundingBox();
+    assert.ok(editorBox.x >= 0 && editorBox.x + editorBox.width <= 340);
+    await page.screenshot({ path: path.join(root, 'artifacts/demo-node-editor.png') });
+    await page.locator('#editor-save').click();
+    await page.locator('#annotation-editor').waitFor({ state: 'hidden' });
+    assert.equal(await card.locator('.node-title').innerText(), '方案 A · 等待评审');
+    assert.equal(await card.locator('.node-tag').count(), 2);
+    await card.hover(); await page.locator('#tooltip').waitFor({ state: 'visible' });
+    const annotatedTooltip = await page.locator('#tooltip').innerText();
+    for (const text of ['方案 A · 等待评审', child.title, '进行中', '待验证', '核对边界条件']) assert.ok(annotatedTooltip.includes(text));
+    await page.setViewportSize({ width: 1100, height: 850 });
+    await page.screenshot({ path: path.join(root, 'artifacts/demo-annotations.png') });
+    await page.reload(); await page.waitForSelector('.node');
+    assert.equal(await card.locator('.node-title').innerText(), '方案 A · 等待评审');
+    await page.locator('#search').fill('核对边界条件'); assert.equal(await page.locator('.family').count(), 1);
+    await edit.click();
+    assert.equal(await page.locator('#node-note').inputValue(), '用于讨论接口。\n核对边界条件后再继续。');
+    await page.locator('#node-alias').fill('不保存的修改'); await page.locator('#editor-cancel').click();
+    assert.equal(await card.locator('.node-title').innerText(), '方案 A · 等待评审');
+    await edit.click();
+    await page.evaluate(() => { window.rejectSave = true; });
+    await page.locator('#node-alias').fill('<img src=x onerror="window.injected=true">');
+    await page.locator('#editor-save').click(); await page.locator('#editor-error').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#annotation-editor').isVisible(), true);
+    assert.equal(await page.locator('#editor-save').isEnabled(), true);
+    assert.equal(await card.locator('.node-title').innerText(), '方案 A · 等待评审');
+    await page.evaluate(() => { window.rejectSave = false; });
+    await page.locator('#editor-save').click(); await page.locator('#annotation-editor').waitFor({ state: 'hidden' });
+    assert.equal(await card.locator('img').count(), 0);
+    assert.ok((await card.locator('.node-title').innerText()).includes('<img'));
+    assert.equal(await page.evaluate(() => window.injected), undefined);
+    await edit.click(); await page.locator('#editor-clear').click();
+    assert.equal(await page.locator('#node-alias').inputValue(), '');
+    await page.locator('#editor-save').click(); await page.locator('#annotation-editor').waitFor({ state: 'hidden' });
+    await page.locator('#search').fill('');
+    assert.equal(await card.locator('.node-title').innerText(), child.title);
+    assert.equal(await card.locator('.node-tag').count(), 0);
+    assert.equal(await card.locator('.node-note-icon').count(), 0);
     // Session text must be plain text even when it resembles executable HTML.
     await page.evaluate(snapshot => window.postMessage({ ...snapshot, type: 'data', nodes: snapshot.nodes.map(n => n.relation === 'fork' ? { ...n, title: '<img src=x onerror="window.injected=true">' } : n) }, '*'), data);
     await page.locator('#search').fill('onerror');
@@ -68,7 +137,7 @@ async function run() {
     await page.waitForFunction(() => document.querySelectorAll('.node').length === 0);
     assert.equal(await page.locator('#environment').isVisible(), false);
     assert.deepEqual(errors, []);
-    console.log('Browser: synthetic branch rendering, hover fields, hide, click message, collapse, search ancestry, narrow layout, and text escaping passed.');
+    console.log('Browser: tree/navigation regressions, alias/tags/multiline notes, save/reload, cancel/clear, storage failure recovery, live refresh, search, narrow editor and text escaping passed.');
   } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }
 }
 run().catch(error => { console.error(error); process.exitCode = 1; });

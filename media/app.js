@@ -6,22 +6,28 @@ const previous = vscode.getState() || {};
 const state = { nodes: [], selectedId: '', workspacePaths: [], branches: previous.branches ?? true,
   query: previous.query || '', archived: previous.archived || false, agents: previous.agents || false,
   workspace: previous.workspace || false, collapsed: new Set(previous.collapsed || []) };
-let hoverTimer, activeHover, renderKey = '', edgeFrame;
+let hoverTimer, activeHover, renderKey = '', edgeFrame, editing, savingAnnotation = false;
 const effortNames = { minimal: '极低', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高', ultra: 'Ultra' };
 const relationNames = { root: '起始会话', fork: '分支', agent: '子代理', unknown: '关系未知' };
 function save() { const { branches, query, archived, agents, workspace, collapsed } = state; vscode.setState({ branches, query, archived, agents, workspace, collapsed: [...collapsed] }); }
 function element(tag, cls, text) { const el = document.createElement(tag); if (cls) el.className = cls; if (text !== undefined) el.textContent = text; return el; }
 function date(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '未记录'; }
+function displayTitle(item) { return item.annotation?.alias || item.title; }
 function hideTooltip() { clearTimeout(hoverTimer); activeHover = undefined; $('tooltip').hidden = true; }
 function showTooltip(item, button) {
   clearTimeout(hoverTimer); activeHover = button;
   hoverTimer = setTimeout(() => {
     if (activeHover !== button) return;
-    const tooltip = $('tooltip'); tooltip.replaceChildren(element('div', 'tooltip-title', item.title));
+    if ($('annotation-editor').open) return;
+    const tooltip = $('tooltip'); tooltip.replaceChildren(element('div', 'tooltip-title', displayTitle(item)));
     const effort = item.effort ? `${effortNames[item.effort] || item.effort} (${item.effort})` : '未记录';
-    for (const [label, value] of [['模型', item.model || '未记录'], ['推理强度', effort], ['关系', relationNames[item.relation] || '关系未知'], ['更新时间', date(item.updatedAt)], ['工作目录', item.cwd || '未记录'], ['会话 ID', item.id]]) {
+    const fields = [['模型', item.model || '未记录'], ['推理强度', effort], ['关系', relationNames[item.relation] || '关系未知'], ['更新时间', date(item.updatedAt)], ['工作目录', item.cwd || '未记录'], ['会话 ID', item.id]];
+    if (item.annotation?.alias) fields.unshift(['原主题', item.title]);
+    if (item.annotation?.tags?.length) fields.unshift(['标签', item.annotation.tags.join('、')]);
+    for (const [label, value] of fields) {
       const row = element('div', 'tooltip-row'); row.append(element('span', 'tooltip-label', label), element('span', 'tooltip-value', value)); tooltip.append(row);
     }
+    if (item.annotation?.note) tooltip.append(element('div', 'tooltip-note tooltip-annotation', item.annotation.note));
     tooltip.append(element('div', 'tooltip-note', '模型与强度来自最近保存的元数据。' + (item.relation === 'unknown' ? ' 原始分支记录缺失，未推断父子关系。' : '') + (!item.available ? ' 本地历史记录不可用。' : '')));
     tooltip.hidden = false;
     const rect = button.getBoundingClientRect();
@@ -36,14 +42,20 @@ function makeBranch(item) {
   button.classList.toggle('selected', item.id === state.selectedId);
   button.classList.toggle('context', item.contextOnly || !!item.missing);
   button.classList.toggle('has-children', item.children.length > 0);
-  button.setAttribute('aria-label', `${item.title}，${relationNames[item.relation]}，${item.model || '模型未记录'}，${item.effort || '强度未记录'}。点击切换会话`);
+  button.setAttribute('aria-label', `${displayTitle(item)}，${(item.annotation?.tags || []).join('，')}，${relationNames[item.relation]}，${item.model || '模型未记录'}，${item.effort || '强度未记录'}。点击切换会话`);
   button.setAttribute('aria-describedby', 'tooltip');
   if (!item.available) button.setAttribute('aria-disabled', 'true');
-  button.append(element('span', 'node-title', item.title));
+  button.append(element('span', 'node-title', displayTitle(item)));
+  if (item.annotation?.tags?.length) {
+    const tags = element('span', 'node-tags');
+    for (const value of item.annotation.tags) { const tag = element('span', 'node-tag', value); tag.dataset.tag = value; tags.append(tag); }
+    button.append(tags);
+  }
   const meta = element('span', 'node-meta');
   meta.append(element('i', 'dot'), element('span', 'node-kind', item.missing ? '记录缺失' : relationNames[item.relation]));
   if (item.archived) meta.append(element('span', '', '· 已归档'));
   meta.append(element('span', '', `· ${item.id.slice(0, 8)}`));
+  if (item.annotation?.note) { const icon = element('span', 'node-note-icon', '▤'); icon.setAttribute('aria-label', '含备注'); meta.append(icon); }
   button.append(meta);
   button.addEventListener('mouseenter', () => showTooltip(item, button));
   button.addEventListener('mouseleave', hideTooltip);
@@ -56,10 +68,13 @@ function makeBranch(item) {
     vscode.postMessage({ type: 'open', id: item.id });
   });
   wrap.append(button); branch.append(wrap);
+  const edit = element('button', 'node-edit', '✎'); edit.type = 'button'; edit.dataset.id = item.id;
+  edit.title = '编辑别名、标签与备注'; edit.setAttribute('aria-label', `编辑 ${displayTitle(item)} 的别名、标签与备注`);
+  edit.addEventListener('click', () => openEditor(item)); wrap.append(edit);
   if (item.children.length) {
     const closed = state.collapsed.has(item.id);
     const toggle = element('button', 'collapse', closed ? '+' : '−');
-    toggle.setAttribute('aria-label', `${closed ? '展开' : '折叠'} ${item.title} 的分支`);
+    toggle.setAttribute('aria-label', `${closed ? '展开' : '折叠'} ${displayTitle(item)} 的分支`);
     toggle.setAttribute('aria-expanded', String(!closed));
     toggle.addEventListener('click', () => { closed ? state.collapsed.delete(item.id) : state.collapsed.add(item.id); save(); render(); });
     wrap.append(toggle);
@@ -118,6 +133,39 @@ function render() {
   drawEdges();
 }
 function showError(message) { $('error').textContent = message; $('error').hidden = !message; }
+function editorBusy(busy) {
+  savingAnnotation = busy;
+  for (const control of $('annotation-form').elements) control.disabled = busy;
+  $('editor-save').textContent = busy ? '正在保存…' : '保存';
+}
+function openEditor(item) {
+  hideTooltip();
+  editing = { id: item.id, dataHome: state.dataHome };
+  const annotation = item.annotation || {};
+  $('editor-original-title').textContent = item.title;
+  $('node-alias').value = annotation.alias || '';
+  $('node-note').value = annotation.note || '';
+  for (const box of document.querySelectorAll('[name="node-tag"]')) box.checked = (annotation.tags || []).includes(box.value);
+  $('editor-error').hidden = true; editorBusy(false);
+  $('annotation-editor').showModal(); $('node-alias').focus();
+}
+function closeEditor() { if (!savingAnnotation) { $('annotation-editor').close(); editing = undefined; } }
+$('editor-close').onclick = closeEditor; $('editor-cancel').onclick = closeEditor;
+$('annotation-editor').addEventListener('cancel', event => { event.preventDefault(); closeEditor(); });
+$('editor-clear').onclick = () => {
+  $('node-alias').value = ''; $('node-note').value = '';
+  for (const box of document.querySelectorAll('[name="node-tag"]')) box.checked = false;
+  $('node-alias').focus();
+};
+$('annotation-form').addEventListener('submit', event => {
+  event.preventDefault();
+  if (!editing || savingAnnotation) return;
+  $('editor-error').hidden = true; editorBusy(true);
+  vscode.postMessage({ type: 'saveAnnotation', ...editing, annotation: {
+    alias: $('node-alias').value, note: $('node-note').value,
+    tags: [...document.querySelectorAll('[name="node-tag"]:checked')].map(box => box.value)
+  } });
+});
 for (const name of ['workspace', 'archived', 'agents']) {
   $(name).checked = state[name];
   $(name).addEventListener('change', () => { state[name] = $(name).checked; save(); render(); });
@@ -133,6 +181,9 @@ window.addEventListener('message', event => {
   const data = event.data;
   if (data.type === 'data') {
     state.nodes = data.nodes; state.selectedId = data.selectedId; state.workspacePaths = data.workspacePaths || [];
+    const nextHome = data.environment?.dataHome;
+    if (editing && editing.dataHome !== nextHome) { editorBusy(false); closeEditor(); }
+    state.dataHome = nextHome;
     state.platform = data.environment?.platform;
     $('environment').hidden = !data.environment;
     if (data.environment) {
@@ -145,8 +196,18 @@ window.addEventListener('message', event => {
     $('status').textContent = `更新于 ${new Date(data.scannedAt).toLocaleTimeString('zh-CN', { hour12: false })}`;
     showError((data.warnings || []).join('\n'));
   } else if (data.type === 'dataUnavailable') {
+    editorBusy(false); closeEditor(); state.dataHome = undefined;
     state.nodes = []; renderKey = ''; $('environment').hidden = true; render();
     $('count').textContent = '当前环境的会话数据不可用'; $('empty').hidden = true;
+  } else if (data.type === 'annotationSaved' || data.type === 'annotationUpdated') {
+    if (state.dataHome === data.dataHome) {
+      const item = state.nodes.find(node => node.id === data.id);
+      if (item) item.annotation = data.annotation;
+      if (data.type === 'annotationSaved' && editing?.id === data.id && editing.dataHome === data.dataHome) { editorBusy(false); closeEditor(); }
+      renderKey = ''; render(); $('status').textContent = '节点信息已保存';
+    }
+  } else if (data.type === 'annotationError') {
+    if (editing?.id === data.id) { editorBusy(false); $('editor-error').textContent = data.message; $('editor-error').hidden = false; }
   } else if (data.type === 'error') { showError(data.message); $('status').textContent = '操作未完成'; }
   else if (data.type === 'selected') {
     state.selectedId = data.id;
