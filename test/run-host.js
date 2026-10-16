@@ -16,6 +16,8 @@ for (const item of fixtures.nodes) {
 }
 fs.writeFileSync(path.join(fixtureHome, 'session_index.jsonl'), fixtures.nodes.map(item => JSON.stringify({ id: item.id, thread_name: item.title })).join('\n') + '\n');
 process.env.CODEX_HOME = fixtureHome;
+const workspace = path.join(fixtureHome, 'target-workspace');
+fs.mkdirSync(workspace);
 // Codex's integrated terminal can inherit Electron's Node-only launch flag.
 delete process.env.ELECTRON_RUN_AS_NODE;
 runTests({
@@ -24,7 +26,7 @@ runTests({
   cachePath: path.join(root, 'artifacts', 'vscode-runtime'),
   extensionDevelopmentPath: root,
   extensionTestsPath: path.join(__dirname, 'host-smoke.js'),
-  launchArgs: ['--disable-extensions', '--disable-workspace-trust', '--skip-welcome', '--skip-release-notes',
+  launchArgs: [workspace, '--disable-extensions', '--disable-workspace-trust', '--skip-welcome', '--skip-release-notes',
     '--user-data-dir', path.join(root, 'artifacts', 'vscode-test-user'), '--extensions-dir', path.join(root, 'artifacts', 'vscode-test-extensions')]
 }).catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {
   // Delete only this exact test-created directory, never a user CODEX_HOME.

@@ -20,6 +20,8 @@ header { padding: 22px 22px 14px; border-bottom: 1px solid var(--line); }
 .eyebrow { color: var(--accent); letter-spacing: 2px; font-size: 10px; font-weight: 600; }
 h1 { font-size: 22px; letter-spacing: -.4px; margin: 6px 0 0; font-weight: 600; }
 .intro { color: var(--muted); line-height: 1.7; margin: 8px 0 18px; }
+.environment { color: var(--muted); background: var(--card); border-left: 2px solid var(--accent); padding: 8px 10px; margin: 0 0 14px; font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+#environment-label { color: var(--accent); }
 .icon { font-size: 20px; border: 0; width: 32px; height: 32px; padding: 0; flex-shrink: 0; }
 .search-row { display: flex; gap: 8px; align-items: center; }
 #search { width: 100%; min-width: 0; color: var(--vscode-input-foreground, var(--fg)); border: 1px solid var(--vscode-input-border, var(--line)); background: var(--vscode-input-background, var(--card)); border-radius: 6px; padding: 9px 10px; }

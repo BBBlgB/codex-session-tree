@@ -9,8 +9,9 @@
 </head>
 <body>
   <header>
-    <div class="heading"><div><div class="eyebrow">CODEX / SESSIONS</div><h1>会话关系树</h1></div><button id="expand" class="icon" title="在编辑区打开关系图" aria-label="在编辑区打开关系图">↗</button></div>
+    <div class="heading"><div><div class="eyebrow">CODEX / SESSIONS</div><h1>会话关系树</h1></div><button id="expand" class="icon" title="在此窗口的编辑区打开关系图" aria-label="在此窗口的编辑区打开关系图">↗</button></div>
     <p class="intro">沿着分支继续思考。点击节点，回到对应会话。</p>
+    <div id="environment" class="environment" aria-label="会话数据来源" hidden><div id="environment-label"></div><div id="environment-workspace"></div><div id="environment-home"></div></div>
     <div class="search-row"><input id="search" type="search" placeholder="搜索主题、模型或会话 ID" aria-label="搜索会话"><button id="refresh" class="icon" aria-label="刷新会话" title="刷新">↻</button></div>
     <div class="tabs" role="group" aria-label="显示范围"><button id="branches" class="tab active" aria-pressed="true">分支家族</button><button id="all" class="tab" aria-pressed="false">全部会话</button></div>
     <div class="filters"><label><input id="workspace" type="checkbox">当前项目</label><label><input id="archived" type="checkbox">已归档</label><label><input id="agents" type="checkbox">子代理</label></div>

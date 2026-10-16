@@ -1,27 +1,28 @@
 'use strict';
 
 const vscode = require('vscode');
-const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const { execFile } = require('node:child_process');
 const { openSession } = require('./navigation');
+const { resolveRuntime, describeEnvironment } = require('./runtime');
 
 function scan(extensionPath) {
   const config = vscode.workspace.getConfiguration('codexSessionTree');
-  const custom = config.get('pythonPath', '').trim();
-  const python = custom || (process.platform === 'win32' ? 'py' : 'python3');
-  const args = !custom && process.platform === 'win32' ? ['-3'] : [];
-  const dataHome = config.get('codexHome', '').trim() || process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
-  args.push('-X', 'utf8', path.join(extensionPath, 'scripts', 'index_sessions.py'), '--codex-home', dataHome);
+  if (process.platform === 'win32' && vscode.workspace.getConfiguration('chatgpt').get('runCodexInWindowsSubsystemForLinux', false)) {
+    throw new Error('Codex 配置为在 WSL 中运行。请在对应 WSL 工作区窗口安装并打开会话树，避免误读 Windows 会话。');
+  }
+  const runtime = resolveRuntime({ platform: process.platform, home: os.homedir(), env: process.env,
+    extensionPath, pythonPath: config.get('pythonPath', ''), codexHome: config.get('codexHome', '') });
+  const environment = describeEnvironment(vscode, runtime, os.hostname());
   return new Promise((resolve, reject) => {
-    execFile(python, args, { windowsHide: true, timeout: 25000, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile(runtime.python, runtime.args, { windowsHide: true, timeout: 25000, maxBuffer: 16 * 1024 * 1024, encoding: 'utf8' }, (error, stdout, stderr) => {
       if (error) {
-        reject(new Error(error.code === 'ENOENT' ? '找不到 Python 3，请在扩展设置中填写 pythonPath。' : stderr.trim() || error.message));
+        reject(new Error(error.code === 'ENOENT' ? `${environment.label} 找不到 Python 3，请在该环境安装 Python 3.10+，或配置 pythonPath。` : stderr.trim() || error.message));
         return;
       }
-      try { resolve(JSON.parse(stdout)); } catch (e) { reject(new Error(`会话索引输出无法解析：${e.message}`)); }
+      try { resolve({ ...JSON.parse(stdout), environment }); } catch (e) { reject(new Error(`会话索引输出无法解析：${e.message}`)); }
     });
   });
 }
@@ -54,7 +55,11 @@ function activate(context) {
         snapshot = await scan(context.extensionPath);
         const workspacePaths = (vscode.workspace.workspaceFolders || []).map(folder => folder.uri.fsPath);
         send({ type: 'data', ...snapshot, selectedId, workspacePaths });
-      } catch (error) { report(error); }
+      } catch (error) {
+        snapshot = undefined;
+        send({ type: 'dataUnavailable' });
+        report(error);
+      }
       finally { pending = undefined; }
     })();
     return pending;
@@ -66,7 +71,7 @@ function activate(context) {
       try {
         if (!message || typeof message.type !== 'string') return;
         if (message.type === 'ready' || message.type === 'refresh') await refresh(true);
-        else if (message.type === 'openPanel') await vscode.commands.executeCommand('codexSessionTree.open');
+        else if (message.type === 'openPanel') await vscode.commands.executeCommand('codexSessionTree.openHere');
         else if (message.type === 'settings') await vscode.commands.executeCommand('codexSessionTree.settings');
         else if (message.type === 'open' && typeof message.id === 'string') {
           const item = snapshot?.nodes.find(node => node.id === message.id);
@@ -83,7 +88,9 @@ function activate(context) {
   }
   function openPanel() {
     if (panel) { panel.reveal(vscode.ViewColumn.Active); return; }
-    panel = vscode.window.createWebviewPanel('codexSessionTree.graph', 'Codex 会话关系图', vscode.ViewColumn.Active,
+    // This API belongs to the invoking extension host's VS Code window, including
+    // SSH/WSL hosts. Never launch a global vscode:// URI to choose a graph window.
+    panel = vscode.window.createWebviewPanel('codexSessionTree.graph', `Codex 会话关系图 · ${vscode.workspace.name || '空窗口'}`, vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true });
     attach(panel);
     panel.onDidDispose(() => { panel = undefined; });
@@ -95,10 +102,10 @@ function activate(context) {
         context.subscriptions.push(view.onDidChangeVisibility(() => { if (view.visible) void refresh(true); }));
       }
     }, { webviewOptions: { retainContextWhenHidden: true } }),
+    vscode.commands.registerCommand('codexSessionTree.openHere', openPanel),
     vscode.commands.registerCommand('codexSessionTree.open', openPanel),
     vscode.commands.registerCommand('codexSessionTree.refresh', () => refresh(true)),
-    vscode.commands.registerCommand('codexSessionTree.settings', () => vscode.commands.executeCommand('workbench.action.openSettings', '@ext:local-tools.codex-session-tree')),
-    vscode.window.registerUriHandler({ handleUri(uri) { if (uri.path === '/open') openPanel(); } })
+    vscode.commands.registerCommand('codexSessionTree.settings', () => vscode.commands.executeCommand('workbench.action.openSettings', '@ext:local-tools.codex-session-tree'))
   );
   let lastRefresh = 0;
   const timer = setInterval(() => {
@@ -107,7 +114,7 @@ function activate(context) {
   }, 1000);
   context.subscriptions.push({ dispose() { clearInterval(timer); panel?.dispose(); } },
     vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration('codexSessionTree')) void refresh(true); }));
-  return { refresh, getSnapshot: () => snapshot };
+  return { refresh, getSnapshot: () => snapshot, getPanelTitle: () => panel?.title };
 }
 
 module.exports = { activate, getHtml };

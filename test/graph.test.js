@@ -25,14 +25,16 @@ test('workspace matching handles Windows extended path prefixes', () => {
 test('cycles cannot hide nodes or cause unbounded traversal', () => {
   assert.equal(buildForest([{ ...a, parentId: 'B' }, b]).length, 2);
 });
-test('navigation targets the installed Codex URI handler using this editor scheme', async () => {
+test('navigation resolves and preserves the target window before opening Codex', async () => {
   const calls = [];
-  const mock = { env: { uriScheme: 'vscode-insiders' }, Uri: { from: value => ({ ...value, toString: () => `${value.scheme}://${value.authority}${value.path}` }) },
+  const resolved = { path: `/local/${id}`, query: 'windowId=target-window', toString: () => `vscode-insiders://openai.chatgpt/local/${id}?windowId=target-window` };
+  const mock = { env: { uriScheme: 'vscode-insiders', asExternalUri: async uri => { calls.push(['resolve', uri]); return resolved; } }, Uri: { from: value => ({ ...value, toString: () => `${value.scheme}://${value.authority}${value.path}` }) },
     extensions: { getExtension: () => ({ activate: async () => calls.push('activate') }) },
     commands: { executeCommand: async (...args) => calls.push(args) } };
   const url = await openSession(mock, { id, available: true });
-  assert.equal(url, `vscode-insiders://openai.chatgpt/local/${id}`);
-  assert.equal(calls[0], 'activate'); assert.equal(calls[1][0], 'vscode.open'); assert.equal(calls[1][1].path, `/local/${id}`);
+  assert.equal(url, resolved.toString());
+  assert.equal(calls[0], 'activate'); assert.equal(calls[1][0], 'resolve');
+  assert.equal(calls[2][0], 'vscode.open'); assert.equal(calls[2][1], resolved);
   assert.throws(() => sessionUri(mock, '../../settings'), /无效/);
   await assert.rejects(() => openSession(mock, { id, available: false }), /不可用/);
 });

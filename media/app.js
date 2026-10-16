@@ -133,10 +133,20 @@ window.addEventListener('message', event => {
   const data = event.data;
   if (data.type === 'data') {
     state.nodes = data.nodes; state.selectedId = data.selectedId; state.workspacePaths = data.workspacePaths || [];
-    const key = JSON.stringify([data.nodes, data.selectedId, state.workspacePaths]);
+    state.platform = data.environment?.platform;
+    $('environment').hidden = !data.environment;
+    if (data.environment) {
+      $('environment-label').textContent = data.environment.label;
+      $('environment-workspace').textContent = `当前窗口：${data.environment.workspace}`;
+      $('environment-home').textContent = `会话目录：${data.environment.dataHome}`;
+    }
+    const key = JSON.stringify([data.nodes, data.selectedId, state.workspacePaths, state.platform]);
     if (key !== renderKey) { renderKey = key; render(); }
     $('status').textContent = `更新于 ${new Date(data.scannedAt).toLocaleTimeString('zh-CN', { hour12: false })}`;
     showError((data.warnings || []).join('\n'));
+  } else if (data.type === 'dataUnavailable') {
+    state.nodes = []; renderKey = ''; $('environment').hidden = true; render();
+    $('count').textContent = '当前环境的会话数据不可用'; $('empty').hidden = true;
   } else if (data.type === 'error') { showError(data.message); $('status').textContent = '操作未完成'; }
   else if (data.type === 'selected') {
     state.selectedId = data.id;

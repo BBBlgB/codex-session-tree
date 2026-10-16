@@ -14,9 +14,10 @@ async function openSession(vscode, item) {
   const codex = vscode.extensions.getExtension('openai.chatgpt');
   if (!codex) throw new Error('请先安装 OpenAI 的 Codex 扩展（openai.chatgpt）。');
   await codex.activate();
-  const uri = sessionUri(vscode, item.id);
-  // vscode.open dispatches through this window's opener and extension URI handler.
-  // Avoid an OS-level vscode:// launch, which can target a different window.
+  // VS Code attaches its window routing context here (windowId on desktop).
+  // A bare vscode:// URI can otherwise be delivered to a different open window.
+  const uri = await vscode.env.asExternalUri(sessionUri(vscode, item.id));
+  // Keep the complete resolved URI; never reconstruct or cache its routing data.
   await vscode.commands.executeCommand('vscode.open', uri);
   return uri.toString();
 }

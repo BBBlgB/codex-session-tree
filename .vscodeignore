@@ -3,6 +3,7 @@ node_modules/**
 test/**
 artifacts/**
 scripts/__pycache__/**
+scripts/test-python.js
 package-lock.json
 *.vsix
 *.log

@@ -1,12 +1,17 @@
 (function (root) {
   'use strict';
-  function normalizedPath(value) { return String(value || '').replace(/^\\\\\?\\/, '').replaceAll('\\', '/').replace(/\/$/, '').toLowerCase(); }
+  function normalizedPath(value, platform) {
+    const raw = String(value || '');
+    const windows = platform ? platform === 'win32' : /^(?:[A-Za-z]:[\\/]|\\\\)/.test(raw);
+    if (windows) return raw.replace(/^\\\\\?\\UNC\\/i, '\\\\').replace(/^\\\\\?\\/, '').replaceAll('\\', '/').replace(/\/$/, '').toLowerCase();
+    return raw.length > 1 ? raw.replace(/\/$/, '') : raw;
+  }
   function buildForest(nodes, filters = {}) {
     const items = new Map(nodes.map(node => [node.id, { ...node, children: [], contextOnly: false }]));
     const allowed = new Set();
     for (const item of items.values()) {
       if ((!filters.archived && item.archived) || (!filters.agents && item.isAgent) || item.missing) continue;
-      if (filters.workspace && !(filters.workspacePaths || []).some(p => normalizedPath(p) === normalizedPath(item.cwd))) continue;
+      if (filters.workspace && !(filters.workspacePaths || []).some(p => normalizedPath(p, filters.platform) === normalizedPath(item.cwd, filters.platform))) continue;
       allowed.add(item.id);
     }
     const visible = new Set(allowed);

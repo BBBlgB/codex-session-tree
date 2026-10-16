@@ -8,6 +8,7 @@ const root = path.resolve(__dirname, '..');
 
 async function run() {
   const data = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'sessions.json'), 'utf8'));
+  data.environment = { platform: 'linux', label: 'Linux · ssh-remote+example-host', workspace: 'example-project', dataHome: '/home/example/.codex' };
   const server = http.createServer((request, response) => {
     const name = request.url === '/' ? 'index.html' : request.url.slice(1);
     if (!['index.html', 'style.css', 'graph.js', 'app.js', 'bridge.js'].includes(name)) { response.writeHead(404); response.end(); return; }
@@ -29,6 +30,10 @@ async function run() {
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.waitForSelector('.node');
+    assert.ok((await page.locator('#environment').innerText()).includes('Linux · ssh-remote+example-host'));
+    assert.ok((await page.locator('#environment-home').innerText()).includes('/home/example/.codex'));
+    await page.locator('#expand').click();
+    assert.ok((await page.evaluate(() => window.messages)).some(m => m.type === 'openPanel'));
     const child = data.nodes.find(item => item.relation === 'fork');
     assert.ok(child, 'Synthetic fixture must include a fork.');
     const card = page.locator(`button.node[data-id="${child.id}"]`);
@@ -59,6 +64,9 @@ async function run() {
     await page.locator('#search').fill('onerror');
     assert.equal(await page.locator('.node img').count(), 0);
     assert.equal(await page.evaluate(() => window.injected), undefined);
+    await page.evaluate(() => window.postMessage({ type: 'dataUnavailable' }, '*'));
+    await page.waitForFunction(() => document.querySelectorAll('.node').length === 0);
+    assert.equal(await page.locator('#environment').isVisible(), false);
     assert.deepEqual(errors, []);
     console.log('Browser: synthetic branch rendering, hover fields, hide, click message, collapse, search ancestry, narrow layout, and text escaping passed.');
   } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }
