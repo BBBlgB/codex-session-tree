@@ -5,12 +5,14 @@ const $ = id => document.getElementById(id);
 const previous = vscode.getState() || {};
 const state = { nodes: [], selectedId: '', workspacePaths: [], branches: previous.branches ?? true,
   query: previous.query || '', archived: previous.archived || false, agents: previous.agents || false,
-  workspace: previous.workspace || false, showRemoved: previous.showRemoved || false, collapsed: new Set(previous.collapsed || []) };
+  workspace: previous.workspace || false, showRemoved: previous.showRemoved || false,
+  collapsed: new Set(previous.collapsed || []), expandedFamilies: new Set(previous.expandedFamilies || []) };
 const changingVisibility = new Set();
 let hoverTimer, activeHover, renderKey = '', edgeFrame, editing, savingAnnotation = false;
 const effortNames = { minimal: '极低', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高', ultra: 'Ultra' };
 const relationNames = { root: '起始会话', fork: '分支', agent: '子代理', unknown: '关系未知' };
-function save() { const { branches, query, archived, agents, workspace, showRemoved, collapsed } = state; vscode.setState({ branches, query, archived, agents, workspace, showRemoved, collapsed: [...collapsed] }); }
+function save() { const { branches, query, archived, agents, workspace, showRemoved, collapsed, expandedFamilies } = state; vscode.setState({ branches, query, archived, agents, workspace, showRemoved, collapsed: [...collapsed], expandedFamilies: [...expandedFamilies] }); }
+function familyKey(id) { return JSON.stringify([state.dataHome, id]); }
 function element(tag, cls, text) { const el = document.createElement(tag); if (cls) el.className = cls; if (text !== undefined) el.textContent = text; return el; }
 function date(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '未记录'; }
 function displayTitle(item) { return item.annotation?.alias || item.title; }
@@ -134,14 +136,28 @@ function render() {
   const roots = SessionGraph.buildForest(state.nodes, state);
   const forest = $('forest'); forest.replaceChildren();
   for (const root of roots) {
-    const family = element('section', 'family');
-    const heading = element('div', 'family-heading');
+    const family = element('section', 'family'); family.dataset.id = root.id;
+    const expanded = state.expandedFamilies.has(familyKey(root.id));
+    const heading = element('button', 'family-heading'); heading.type = 'button';
+    heading.setAttribute('aria-expanded', String(expanded));
+    heading.setAttribute('aria-label', `${expanded ? '收起' : '展开'} ${displayTitle(root)} 的会话树`);
+    heading.append(element('span', 'family-chevron', expanded ? '▾' : '▸'));
+    const label = element('span', 'family-label');
+    label.append(element('span', 'family-title', displayTitle(root)));
     const normalized = (root.cwd || '').replaceAll('\\', '/').replace(/\/$/, '');
     const project = element('span', 'project', normalized.split('/').pop() || '未记录项目'); project.title = root.cwd;
-    heading.append(project, element('span', 'family-count', `${root.size} 个会话`));
+    label.append(project);
+    heading.append(label, element('span', 'family-count', `${root.size} 个会话`));
+    heading.addEventListener('click', () => {
+      const key = familyKey(root.id);
+      expanded ? state.expandedFamilies.delete(key) : state.expandedFamilies.add(key);
+      save(); render();
+    });
+    family.append(heading);
+    if (!expanded) { forest.append(family); continue; }
     const canvas = element('div', 'canvas'), scene = element('div', 'scene');
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.classList.add('edges'); svg.setAttribute('aria-hidden', 'true');
-    scene.append(svg, makeBranch(root)); canvas.append(scene); family.append(heading, canvas); forest.append(family);
+    scene.append(svg, makeBranch(root)); canvas.append(scene); family.append(canvas); forest.append(family);
   }
   $('count').textContent = `${roots.length} ${state.branches ? '个分支家族' : '组会话'} · ${roots.reduce((n, root) => n + root.size, 0)} 个节点`;
   $('empty').hidden = roots.length > 0;
@@ -207,7 +223,7 @@ window.addEventListener('message', event => {
       $('environment-workspace').textContent = `当前窗口：${data.environment.workspace}`;
       $('environment-home').textContent = `会话目录：${data.environment.dataHome}`;
     }
-    const key = JSON.stringify([data.nodes, data.selectedId, state.workspacePaths, state.platform]);
+    const key = JSON.stringify([data.nodes, data.selectedId, state.workspacePaths, state.platform, state.dataHome]);
     if (key !== renderKey) { renderKey = key; render(); }
     $('status').textContent = `更新于 ${new Date(data.scannedAt).toLocaleTimeString('zh-CN', { hour12: false })}`;
     showError((data.warnings || []).join('\n'));

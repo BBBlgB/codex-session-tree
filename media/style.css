@@ -36,7 +36,11 @@ h1 { font-size: 22px; letter-spacing: -.4px; margin: 6px 0 0; font-weight: 600; 
 #status { text-align: right; }
 #forest { padding: 14px 22px 20px; }
 .family { margin-bottom: 18px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-.family-heading { padding: 11px 14px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 14px; color: var(--muted); font-size: 11px; }
+.family-heading { width: 100%; border: 0; border-radius: 0; padding: 11px 14px; display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 11px; text-align: left; }
+.family-heading[aria-expanded="true"] { border-bottom: 1px solid var(--line); }
+.family-chevron { flex-shrink: 0; color: var(--accent); }
+.family-label { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.family-title { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .family-count { flex-shrink: 0; color: var(--accent); }
 .canvas { overflow: auto; padding: 22px; }

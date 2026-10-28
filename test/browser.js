@@ -17,7 +17,7 @@ async function run() {
       response.end(`
         window.messages=[];
         const fixture=${JSON.stringify({ type: 'data', ...data, workspacePaths: ['/example/project'] })};
-        window.acquireVsCodeApi=()=>({getState:()=>({}),setState:()=>{},postMessage:m=>{
+        window.acquireVsCodeApi=()=>({getState:()=>JSON.parse(localStorage.getItem('view-state')||'{}'),setState:s=>localStorage.setItem('view-state',JSON.stringify(s)),postMessage:m=>{
           window.messages.push(m);
           if(m.type==='ready')setTimeout(()=>window.postMessage({...fixture,nodes:fixture.nodes.map(n=>({...n,annotation:JSON.parse(localStorage.getItem(n.id)||'null'),removed:localStorage.getItem('removed:'+n.id)==='true'}))},'*'),10);
           if(m.type==='setNodeRemoved')setTimeout(()=>{
@@ -46,6 +46,37 @@ async function run() {
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    await page.waitForSelector('.family-heading');
+    assert.equal(await page.locator('.node').count(), 0, 'Families start collapsed');
+    const rootId = data.nodes.find(node => !node.parentId).id;
+    const firstHeading = page.locator(`.family[data-id="${rootId}"] > .family-heading`);
+    const secondRootId = '33333333-3333-4333-8333-333333333333';
+    const secondChildId = '44444444-4444-4444-8444-444444444444';
+    const twoFamilies = { ...data, nodes: [...data.nodes,
+      { ...data.nodes[0], id: secondRootId, title: '另一棵树' },
+      { ...data.nodes[1], id: secondChildId, parentId: secondRootId, title: '另一棵树的分支' }] };
+    await page.evaluate(snapshot => window.postMessage({ type: 'data', ...snapshot }, '*'), twoFamilies);
+    await page.waitForFunction(() => document.querySelectorAll('.family-heading').length === 2);
+    const secondHeading = page.locator(`.family[data-id="${secondRootId}"] > .family-heading`);
+    await firstHeading.click(); assert.equal(await page.locator('.node').count(), 2);
+    assert.equal(await secondHeading.getAttribute('aria-expanded'), 'false');
+    await secondHeading.click(); assert.equal(await page.locator('.node').count(), 4);
+    await firstHeading.click(); assert.equal(await page.locator('.node').count(), 2);
+    assert.equal(await secondHeading.getAttribute('aria-expanded'), 'true');
+    await page.evaluate(snapshot => window.postMessage({ type: 'data', ...snapshot }, '*'), twoFamilies);
+    await page.waitForFunction(() => document.querySelectorAll('.node').length === 2);
+    assert.equal(await firstHeading.getAttribute('aria-expanded'), 'false', 'Refresh preserves each family state');
+    await page.reload(); await firstHeading.waitFor();
+    assert.equal(await firstHeading.getAttribute('aria-expanded'), 'false', 'Reload preserves collapsed families');
+    await firstHeading.click();
+    await page.reload(); await page.waitForSelector('.node');
+    assert.equal(await firstHeading.getAttribute('aria-expanded'), 'true', 'Reload preserves expanded families');
+    // The same session IDs in a different data source have separate fold states.
+    await page.evaluate(snapshot => window.postMessage({ type: 'data', ...snapshot,
+      environment: { ...snapshot.environment, dataHome: '/other/.codex' } }, '*'), data);
+    await page.waitForFunction(() => document.querySelectorAll('.node').length === 0);
+    assert.equal(await firstHeading.getAttribute('aria-expanded'), 'false');
+    await page.evaluate(snapshot => window.postMessage({ type: 'data', ...snapshot }, '*'), data);
     await page.waitForSelector('.node');
     assert.ok((await page.locator('#environment').innerText()).includes('Linux · ssh-remote+example-host'));
     assert.ok((await page.locator('#environment-home').innerText()).includes('/home/example/.codex'));
@@ -71,6 +102,12 @@ async function run() {
     assert.equal(await page.locator('.family').count(), 1);
     assert.ok(await page.locator(`button.node[data-id="${child.parentId}"]`).count());
     await page.setViewportSize({ width: 340, height: 760 });
+    await firstHeading.click();
+    assert.equal(await page.locator('.node').count(), 0);
+    const headingBox = await firstHeading.boundingBox();
+    assert.ok(headingBox.x >= 0 && headingBox.x + headingBox.width <= 340);
+    await page.screenshot({ path: path.join(root, 'artifacts/demo-collapsed-family.png') });
+    await firstHeading.click();
     await card.hover();
     await page.locator('#tooltip').waitFor({ state: 'visible' });
     const box = await page.locator('#tooltip').boundingBox();
@@ -109,6 +146,7 @@ async function run() {
     await page.screenshot({ path: path.join(root, 'artifacts/demo-annotations.png') });
     await page.reload(); await page.waitForSelector('.node');
     assert.equal(await card.locator('.node-title').innerText(), '方案 A · 等待评审');
+    await page.locator('#search').fill('');
     const removeChild = page.locator(`.node-remove[data-id="${child.id}"]`);
     const parentCard = page.locator(`button.node[data-id="${child.parentId}"]`);
     const removeParent = page.locator(`.node-remove[data-id="${child.parentId}"]`);
@@ -138,6 +176,7 @@ async function run() {
     await removeChild.click(); await page.waitForSelector(`button.node[data-id="${child.id}"]:not(.removed)`);
     await page.locator('#showRemoved').uncheck();
     await removeParent.click(); await parentCard.waitFor({ state: 'detached' });
+    await page.locator(`.family[data-id="${child.id}"] > .family-heading`).click();
     assert.equal(await card.count(), 1, 'Removing a parent must keep its children visible');
     assert.ok((await card.innerText()).includes('父节点已移除'));
     assert.equal(await page.locator('.branch[data-parent]').count(), 0);
@@ -182,7 +221,7 @@ async function run() {
     await page.waitForFunction(() => document.querySelectorAll('.node').length === 0);
     assert.equal(await page.locator('#environment').isVisible(), false);
     assert.deepEqual(errors, []);
-    console.log('Browser: navigation, annotations, removal/reload/restore, surviving parents and children, storage failures, source isolation, narrow layout, search and text escaping passed.');
+    console.log('Browser: independent family collapse/expand, persistence, data-source isolation, narrow layout, navigation, annotations, removal/restore, storage failures, search and text escaping passed.');
   } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }
 }
 run().catch(error => { console.error(error); process.exitCode = 1; });
