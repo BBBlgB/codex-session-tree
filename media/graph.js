@@ -51,14 +51,17 @@
       // A removed node must not make the surviving member of its family vanish.
       item.removedBoundary = boundaries.has(item.id);
       const annotation = item.annotation || {};
-      item.matches = !query || [item.title, item.model, item.effort, item.cwd, item.id, annotation.alias, annotation.note, ...(annotation.tags || [])].some(x => String(x || '').toLowerCase().includes(query));
+      const fields = [item.title, item.model, item.effort, item.cwd, item.id, annotation.alias, annotation.note, annotation.objective, annotation.conclusion, annotation.questions, ...(annotation.tags || [])];
+      item.matchText = query ? fields.find(x => String(x || '').toLowerCase().includes(query)) || '' : '';
+      item.selfMatch = !!query && allowed.has(item.id) && !!item.matchText;
+      item.matches = !query || item.selfMatch;
       for (const child of item.children) {
         finish(child); item.size += child.size; item.latest = Math.max(item.latest, child.latest); item.matches ||= child.matches;
         item.removedBoundary ||= child.removedBoundary;
       }
     }
     roots.forEach(finish);
-    return roots.filter(item => item.matches && (!filters.branches || item.size > 1 || item.removedBoundary))
+    return roots.filter(item => item.matches && (query || !filters.branches || item.size > 1 || item.removedBoundary))
       .sort((a, b) => b.latest - a.latest || a.id.localeCompare(b.id));
   }
   const api = { buildForest, normalizedPath };

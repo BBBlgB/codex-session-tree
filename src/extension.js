@@ -7,9 +7,10 @@ const crypto = require('node:crypto');
 const { execFile } = require('node:child_process');
 const { openSession } = require('./navigation');
 const { resolveRuntime, describeEnvironment } = require('./runtime');
-const { annotateSnapshot, writeAnnotation, writeNodeRemoved } = require('./annotations');
+const { annotateSnapshot, writeAnnotation, writeNodeRemoved, writeFavorite, recordOpened } = require('./annotations');
+const { quickItems } = require('./quick-pick');
 
-function scan(extensionPath) {
+function scan(extensionPath, previewId, expectedHome) {
   const config = vscode.workspace.getConfiguration('codexSessionTree');
   if (process.platform === 'win32' && vscode.workspace.getConfiguration('chatgpt').get('runCodexInWindowsSubsystemForLinux', false)) {
     throw new Error('Codex 配置为在 WSL 中运行。请在对应 WSL 工作区窗口安装并打开会话树，避免误读 Windows 会话。');
@@ -17,6 +18,8 @@ function scan(extensionPath) {
   const runtime = resolveRuntime({ platform: process.platform, home: os.homedir(), env: process.env,
     extensionPath, pythonPath: config.get('pythonPath', ''), codexHome: config.get('codexHome', '') });
   const environment = describeEnvironment(vscode, runtime, os.hostname());
+  if (expectedHome && runtime.dataHome !== expectedHome) throw new Error('会话数据来源已变化，请刷新后重试。');
+  if (previewId) runtime.args.push('--preview', previewId);
   return new Promise((resolve, reject) => {
     execFile(runtime.python, runtime.args, { windowsHide: true, timeout: 25000, maxBuffer: 16 * 1024 * 1024, encoding: 'utf8' }, (error, stdout, stderr) => {
       if (error) {
@@ -43,6 +46,7 @@ function activate(context) {
   const surfaces = new Set();
   let panel, snapshot, pending;
   let selectedId = context.workspaceState.get('selectedSessionId', '');
+  let picker;
   const send = message => { for (const surface of surfaces) void surface.webview.postMessage(message); };
   const report = error => {
     output.appendLine(`${new Date().toISOString()} ${error.message}`);
@@ -65,6 +69,62 @@ function activate(context) {
     })();
     return pending;
   }
+  function checkedNode(id, dataHome) {
+    const item = snapshot?.nodes.find(node => node.id === id);
+    if (!item || snapshot.environment.dataHome !== dataHome) throw new Error('会话数据来源已变化，请刷新后重试。');
+    return item;
+  }
+  async function navigate(id, dataHome) {
+    const item = checkedNode(id, dataHome);
+    const environment = snapshot.environment;
+    const uri = await openSession(vscode, item);
+    await recordOpened(context.globalState, environment, item.id);
+    selectedId = item.id;
+    await context.workspaceState.update('selectedSessionId', selectedId);
+    if (snapshot?.environment.dataHome === dataHome) snapshot = annotateSnapshot(context.globalState, snapshot);
+    send({ type: 'selected', id: selectedId });
+    output.appendLine(`已请求 Codex 打开会话：${uri}`);
+  }
+  async function favorite(id, dataHome, value) {
+    checkedNode(id, dataHome);
+    await writeFavorite(context.globalState, snapshot.environment, id, value);
+    if (snapshot?.environment.dataHome === dataHome) snapshot = annotateSnapshot(context.globalState, snapshot);
+    send({ type: 'favoriteUpdated', id, dataHome, favorite: value });
+  }
+  async function quickSwitch() {
+    if (picker) { picker.show(); return; }
+    await refresh(true);
+    if (!snapshot) { void vscode.window.showErrorMessage('会话索引不可用，请查看 Codex 会话树输出。'); return; }
+    // Two command invocations may have awaited the same scan.
+    if (picker) { picker.show(); return; }
+    const dataHome = snapshot.environment.dataHome;
+    const quick = vscode.window.createQuickPick(); picker = quick;
+    quick.title = '切换 Codex 会话';
+    quick.placeholder = '搜索主题、别名、项目或研究记录；星标收藏会话';
+    quick.matchOnDescription = true; quick.matchOnDetail = true;
+    quick.items = quickItems(snapshot.nodes, vscode);
+    const subscriptions = [];
+    subscriptions.push(quick.onDidAccept(async () => {
+      if (quick.busy || !quick.selectedItems[0]?.id) return;
+      quick.busy = true;
+      try { await navigate(quick.selectedItems[0].id, dataHome); quick.hide(); }
+      catch (error) { void vscode.window.showErrorMessage(error.message); }
+      finally { quick.busy = false; }
+    }), quick.onDidTriggerItemButton(async ({ item }) => {
+      if (quick.busy) return;
+      quick.busy = true;
+      try {
+        const node = checkedNode(item.id, dataHome);
+        await favorite(item.id, dataHome, !node.favorite);
+        if (picker === quick && snapshot?.environment.dataHome === dataHome) quick.items = quickItems(snapshot.nodes, vscode);
+      } catch (error) { void vscode.window.showErrorMessage(error.message); }
+      finally { quick.busy = false; }
+    }), quick.onDidHide(() => {
+      if (picker === quick) picker = undefined;
+      subscriptions.forEach(subscription => subscription.dispose()); quick.dispose();
+    }));
+    quick.show();
+  }
   function attach(surface) {
     surfaces.add(surface);
     surface.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'media')] };
@@ -74,6 +134,15 @@ function activate(context) {
         if (message.type === 'ready' || message.type === 'refresh') await refresh(true);
         else if (message.type === 'openPanel') await vscode.commands.executeCommand('codexSessionTree.openHere');
         else if (message.type === 'settings') await vscode.commands.executeCommand('codexSessionTree.settings');
+        else if (message.type === 'quickSwitch') await quickSwitch();
+        else if (message.type === 'favorite') await favorite(message.id, message.dataHome, message.favorite);
+        else if (message.type === 'loadDetails') {
+          if (!Array.isArray(message.ids) || message.ids.length < 1 || message.ids.length > 2 || new Set(message.ids).size !== message.ids.length || typeof message.requestId !== 'string') throw new Error('预览请求格式无效。');
+          for (const id of message.ids) checkedNode(id, message.dataHome);
+          const results = await Promise.allSettled(message.ids.map(id => scan(context.extensionPath, id, message.dataHome)));
+          const details = results.map((result, i) => ({ id: message.ids[i], ...(result.status === 'fulfilled' ? { history: result.value } : { error: result.reason.message }) }));
+          void surface.webview.postMessage({ type: 'details', requestId: message.requestId, dataHome: message.dataHome, details });
+        }
         else if (message.type === 'setNodeRemoved') {
           const item = snapshot?.nodes.find(node => node.id === message.id);
           if (!item || message.dataHome !== snapshot.environment.dataHome) throw new Error('会话数据来源已变化，请刷新后重试。');
@@ -94,16 +163,13 @@ function activate(context) {
           });
         }
         else if (message.type === 'open' && typeof message.id === 'string') {
-          const item = snapshot?.nodes.find(node => node.id === message.id);
-          const uri = await openSession(vscode, item);
-          selectedId = item.id;
-          await context.workspaceState.update('selectedSessionId', selectedId);
-          send({ type: 'selected', id: selectedId });
-          output.appendLine(`已请求 Codex 打开会话：${uri}`);
+          await navigate(message.id, message.dataHome);
         }
       } catch (error) {
         if (message?.type === 'saveAnnotation') void surface.webview.postMessage({ type: 'annotationError', id: message.id, message: error.message });
         else if (message?.type === 'setNodeRemoved') void surface.webview.postMessage({ type: 'nodeVisibilityError', id: message.id, dataHome: message.dataHome, message: error.message });
+        else if (message?.type === 'loadDetails') void surface.webview.postMessage({ type: 'details', requestId: message.requestId, dataHome: message.dataHome, details: (Array.isArray(message.ids) ? message.ids.slice(0, 2) : []).map(id => ({ id, error: error.message })) });
+        else if (message?.type === 'favorite') void surface.webview.postMessage({ type: 'favoriteError', id: message.id, dataHome: message.dataHome, message: error.message });
         else report(error);
       }
     });
@@ -128,6 +194,7 @@ function activate(context) {
     }, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.commands.registerCommand('codexSessionTree.openHere', openPanel),
     vscode.commands.registerCommand('codexSessionTree.open', openPanel),
+    vscode.commands.registerCommand('codexSessionTree.quickSwitch', quickSwitch),
     vscode.commands.registerCommand('codexSessionTree.refresh', () => refresh(true)),
     vscode.commands.registerCommand('codexSessionTree.settings', () => vscode.commands.executeCommand('workbench.action.openSettings', '@ext:local-tools.codex-session-tree'))
   );
@@ -136,8 +203,8 @@ function activate(context) {
     const seconds = vscode.workspace.getConfiguration('codexSessionTree').get('refreshSeconds', 10);
     if (Date.now() - lastRefresh >= seconds * 1000) { lastRefresh = Date.now(); void refresh(); }
   }, 1000);
-  context.subscriptions.push({ dispose() { clearInterval(timer); panel?.dispose(); } },
-    vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration('codexSessionTree')) void refresh(true); }));
+  context.subscriptions.push({ dispose() { clearInterval(timer); picker?.hide(); panel?.dispose(); } },
+    vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration('codexSessionTree')) { picker?.hide(); void refresh(true); } }));
   return { refresh, getSnapshot: () => snapshot, getPanelTitle: () => panel?.title };
 }
 

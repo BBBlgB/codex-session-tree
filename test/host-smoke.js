@@ -25,6 +25,9 @@ async function run() {
   assert.ok(commands.includes('codexSessionTree.open'));
   assert.ok(commands.includes('codexSessionTree.openHere'));
   assert.ok(commands.includes('codexSessionTree.refresh'));
+  assert.ok(commands.includes('codexSessionTree.quickSwitch'));
+  await vscode.commands.executeCommand('codexSessionTree.quickSwitch');
+  await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
   fs.mkdirSync(path.join(extension.extensionPath, 'artifacts'), { recursive: true });
   fs.writeFileSync(path.join(extension.extensionPath, 'artifacts/host-smoke.json'), JSON.stringify({
     vscode: vscode.version, extensionActive: extension.isActive, indexedNodes: snapshot.nodes.length,

@@ -192,9 +192,14 @@ def collect(root):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--codex-home", default=os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
+    parser.add_argument("--preview", help="Read excerpts for one session UUID")
     args = parser.parse_args()
     try:
-        result = collect(args.codex_home)
+        if args.preview:
+            from session_history import read_preview
+            result = read_preview(args.codex_home, args.preview)
+        else:
+            result = collect(args.codex_home)
     except (OSError, sqlite3.Error, ValueError) as error:
         print(str(error), file=sys.stderr)
         sys.exit(1)

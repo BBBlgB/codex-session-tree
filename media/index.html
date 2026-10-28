@@ -12,10 +12,12 @@
     <div class="heading"><div><div class="eyebrow">CODEX / SESSIONS</div><h1>会话关系树</h1></div><button id="expand" class="icon" title="在此窗口的编辑区打开关系图" aria-label="在此窗口的编辑区打开关系图">↗</button></div>
     <p class="intro">沿着分支继续思考。点击节点，回到对应会话。</p>
     <div id="environment" class="environment" aria-label="会话数据来源" hidden><div id="environment-label"></div><div id="environment-workspace"></div><div id="environment-home"></div></div>
-    <div class="search-row"><input id="search" type="search" placeholder="搜索主题、别名、标签或备注" aria-label="搜索会话"><button id="refresh" class="icon" aria-label="刷新会话" title="刷新">↻</button></div>
+    <div class="search-row"><input id="search" type="search" placeholder="搜索主题、别名、标签或备注" aria-label="搜索会话"><button id="quick-switch" title="快速切换会话（Ctrl+Alt+J）">快切</button><button id="refresh" class="icon" aria-label="刷新会话" title="刷新">↻</button></div>
+    <div id="search-navigation" class="search-navigation" hidden><span id="match-count" aria-live="polite"></span><button id="previous-match" aria-label="上一个匹配">↑</button><button id="next-match" aria-label="下一个匹配">↓</button></div>
     <div class="tabs" role="group" aria-label="显示范围"><button id="branches" class="tab active" aria-pressed="true">分支家族</button><button id="all" class="tab" aria-pressed="false">全部会话</button></div>
     <div class="filters"><label><input id="workspace" type="checkbox">当前项目</label><label><input id="archived" type="checkbox">已归档</label><label><input id="agents" type="checkbox">子代理</label><label><input id="showRemoved" type="checkbox">显示已移除</label></div>
   </header>
+  <div id="compare-tray" class="compare-tray" hidden><span id="compare-selection"></span><button id="compare-open">对照</button><button id="compare-clear">清空</button></div>
   <div id="error" role="alert" hidden></div>
   <div class="summary"><span id="count" aria-live="polite">正在读取会话…</span><span id="status"></span></div>
   <main id="forest" aria-label="会话分支关系"></main>
@@ -35,10 +37,20 @@
       </div></fieldset>
       <label for="node-note">备注</label>
       <textarea id="node-note" rows="5" maxlength="6000" placeholder="记录这个分支的用途、结论或待办"></textarea>
+      <details class="research-editor"><summary>研究记录（用于分支对照）</summary>
+        <label for="node-objective">目标</label><textarea id="node-objective" rows="2" maxlength="6000" placeholder="这个分支在解决什么问题"></textarea>
+        <label for="node-conclusion">结论</label><textarea id="node-conclusion" rows="3" maxlength="6000" placeholder="已确认的结论及依据"></textarea>
+        <label for="node-questions">待验证问题</label><textarea id="node-questions" rows="3" maxlength="6000" placeholder="假设、未决问题和下一步"></textarea>
+      </details>
       <p class="editor-hint">保存到会话树插件，重新打开后保留。</p>
       <p id="editor-error" role="alert" hidden></p>
       <div class="editor-actions"><button id="editor-clear" type="button">清空字段</button><span></span><button id="editor-cancel" type="button">取消</button><button id="editor-save" type="submit" class="primary">保存</button></div>
     </form>
+  </dialog>
+  <dialog id="details-dialog" aria-labelledby="details-title">
+    <div class="details-heading"><h2 id="details-title">会话预览</h2><button id="details-refresh">刷新原文</button><button id="details-close" class="icon" aria-label="关闭预览或对照">×</button></div>
+    <p id="details-context"></p>
+    <div id="details-content"></div>
   </dialog>
   <script nonce="{{nonce}}" src="{{graphUri}}"></script>
   <script nonce="{{nonce}}" src="{{appUri}}"></script>

@@ -19,7 +19,15 @@ async function run() {
         const fixture=${JSON.stringify({ type: 'data', ...data, workspacePaths: ['/example/project'] })};
         window.acquireVsCodeApi=()=>({getState:()=>JSON.parse(localStorage.getItem('view-state')||'{}'),setState:s=>localStorage.setItem('view-state',JSON.stringify(s)),postMessage:m=>{
           window.messages.push(m);
-          if(m.type==='ready')setTimeout(()=>window.postMessage({...fixture,nodes:fixture.nodes.map(n=>({...n,annotation:JSON.parse(localStorage.getItem(n.id)||'null'),removed:localStorage.getItem('removed:'+n.id)==='true'}))},'*'),10);
+          if(m.type==='ready')setTimeout(()=>window.postMessage({...fixture,nodes:fixture.nodes.map(n=>({...n,annotation:JSON.parse(localStorage.getItem(n.id)||'null'),removed:localStorage.getItem('removed:'+n.id)==='true',favorite:localStorage.getItem('favorite:'+n.id)==='true'}))},'*'),10);
+          if(m.type==='favorite')setTimeout(()=>{
+            localStorage.setItem('favorite:'+m.id,String(m.favorite));
+            window.postMessage({type:'favoriteUpdated',id:m.id,dataHome:m.dataHome,favorite:m.favorite},'*');
+          },10);
+          if(m.type==='loadDetails'&&!window.delayDetails)setTimeout(()=>window.postMessage({type:'details',requestId:m.requestId,dataHome:m.dataHome,
+            details:m.ids.map(id=>window.rejectDetails?{id,error:'模拟历史读取失败'}:{id,history:{
+              question:{text:'原文问题 <img src=x onerror="window.injected=true">',source:'synthetic.jsonl · byte=200'},
+              answer:{text:'可验证的最终答复 '+id,source:'synthetic.sqlite · item=example',final:true},files:['src/example.py'],warnings:[]}})},'*'),10);
           if(m.type==='setNodeRemoved')setTimeout(()=>{
             if(window.rejectVisibility){window.postMessage({type:'nodeVisibilityError',id:m.id,dataHome:m.dataHome,message:'模拟移除存储失败'},'*');return;}
             if(m.removed)localStorage.setItem('removed:'+m.id,'true');else localStorage.removeItem('removed:'+m.id);
@@ -85,6 +93,70 @@ async function run() {
     const child = data.nodes.find(item => item.relation === 'fork');
     assert.ok(child, 'Synthetic fixture must include a fork.');
     const card = page.locator(`button.node[data-id="${child.id}"]`);
+    // Searching opens the matching path without modifying saved folds.
+    await firstHeading.click();
+    await page.locator('#search').fill(child.title);
+    assert.equal(await card.count(), 1);
+    assert.equal(await card.locator('mark').innerText(), child.title);
+    assert.equal(await page.locator('.search-match').count(), 1);
+    await page.locator('#search').press('Enter');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.id), child.id);
+    await page.locator('#search').fill('');
+    assert.equal(await page.locator('.node').count(), 0, 'Clearing search restores the original collapsed family');
+    await firstHeading.click();
+    await page.locator('.collapse').first().click();
+    await page.locator('#search').fill(child.title);
+    assert.equal(await card.count(), 1, 'Search reveals a previously folded branch');
+    await page.locator('#search').fill('');
+    assert.equal(await card.count(), 0, 'Clearing search restores the folded branch');
+    await page.locator('.collapse').first().click();
+    await page.locator('#search').fill('示例');
+    await page.locator('#previous-match').click();
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.id), child.id);
+    await page.locator('#next-match').click();
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.id), rootId);
+    await page.locator('#search').fill('');
+    await page.locator('#quick-switch').click();
+    assert.ok((await page.evaluate(() => window.messages)).some(m => m.type === 'quickSwitch'));
+
+    const preview = page.locator(`.node-preview[data-id="${child.id}"]`);
+    await preview.click();
+    await page.locator('.detail-loading').waitFor({ state: 'detached' });
+    assert.ok((await page.locator('#details-content').innerText()).includes('可验证的最终答复'));
+    assert.equal(await page.locator('#details-content img').count(), 0);
+    assert.equal(await page.evaluate(() => window.injected), undefined);
+    await page.locator('.detail-favorite').click();
+    await page.waitForFunction(() => document.querySelector('.detail-favorite').textContent.includes('已收藏'));
+    const oldRequest = await page.evaluate(() => window.messages.filter(m => m.type === 'loadDetails').at(-1));
+    await page.locator('#details-close').click();
+    await page.evaluate(() => { window.delayDetails = true; });
+    await page.locator(`.node-preview[data-id="${rootId}"]`).click();
+    await page.evaluate(m => window.postMessage({type:'details',requestId:m.requestId,dataHome:m.dataHome,details:[{id:m.ids[0],error:'stale response'}]},'*'), oldRequest);
+    assert.equal(await page.locator('.detail-loading').count(), 1, 'Late preview responses cannot overwrite a different selection');
+    assert.equal(await page.locator('.detail-error').count(), 0);
+    await page.evaluate(() => { window.delayDetails = false; window.rejectDetails = true; });
+    await page.locator('#details-refresh').click();
+    await page.locator('.detail-error').waitFor();
+    assert.ok((await page.locator('.detail-error').innerText()).includes('模拟历史读取失败'));
+    await page.evaluate(() => { window.rejectDetails = false; });
+    await page.locator('#details-refresh').click();
+    await page.locator('.detail-loading').waitFor({ state: 'detached' });
+    await page.locator('#details-close').click();
+    await page.locator(`.node-compare[data-id="${rootId}"]`).click();
+    assert.equal(await page.locator('#compare-open').isEnabled(), false);
+    await page.locator(`.node-compare[data-id="${child.id}"]`).click();
+    await page.locator('#compare-open').click();
+    await page.waitForFunction(() => document.querySelectorAll('.detail-loading').length === 0);
+    assert.equal(await page.locator('.detail-column').count(), 2);
+    assert.ok((await page.locator('#details-context').innerText()).includes('最近共同祖先'));
+    fs.mkdirSync(path.join(root, 'artifacts'), { recursive: true });
+    await page.screenshot({ path: path.join(root, 'artifacts/demo-comparison.png') });
+    await page.setViewportSize({ width: 340, height: 760 });
+    assert.equal(await page.locator('#details-dialog').evaluate(el => el.scrollWidth <= el.clientWidth), true);
+    await page.screenshot({ path: path.join(root, 'artifacts/demo-preview-sidebar.png') });
+    await page.locator('#details-close').click();
+    await page.locator('#compare-clear').click();
+    await page.setViewportSize({ width: 1100, height: 800 });
     await card.hover();
     await page.locator('#tooltip').waitFor({ state: 'visible' });
     const tooltip = await page.locator('#tooltip').innerText();
@@ -123,6 +195,10 @@ async function run() {
     await page.locator('[name="node-tag"][value="进行中"]').check();
     await page.locator('[name="node-tag"][value="待验证"]').check();
     await page.locator('#node-note').fill('用于讨论接口。\n核对边界条件后再继续。');
+    await page.locator('.research-editor > summary').click();
+    await page.locator('#node-objective').fill('验证协议边界');
+    await page.locator('#node-conclusion').fill('结论依赖参数范围');
+    await page.locator('#node-questions').fill('尚需检查溢出');
     // An automatic scan must not erase a form being edited.
     await page.evaluate(snapshot => window.postMessage({ type: 'data', ...snapshot }, '*'), data);
     assert.equal(await page.locator('#node-alias').inputValue(), '方案 A · 等待评审');
@@ -147,6 +223,10 @@ async function run() {
     await page.reload(); await page.waitForSelector('.node');
     assert.equal(await card.locator('.node-title').innerText(), '方案 A · 等待评审');
     await page.locator('#search').fill('');
+    await preview.click(); await page.locator('.detail-loading').waitFor({ state: 'detached' });
+    assert.ok((await page.locator('#details-content').innerText()).includes('尚需检查溢出'));
+    assert.equal(await page.locator('.detail-favorite').innerText(), '★ 已收藏');
+    await page.locator('#details-close').click();
     const removeChild = page.locator(`.node-remove[data-id="${child.id}"]`);
     const parentCard = page.locator(`button.node[data-id="${child.parentId}"]`);
     const removeParent = page.locator(`.node-remove[data-id="${child.parentId}"]`);

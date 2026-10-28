@@ -76,3 +76,12 @@ test('navigation resolves and preserves the target window before opening Codex',
   assert.throws(() => sessionUri(mock, '../../settings'), /无效/);
   await assert.rejects(() => openSession(mock, { id, available: false }), /不可用/);
 });
+
+test('search marks exact hits, includes standalone matches, and respects archive filters', () => {
+  const nodes = [{ ...a, archived: true, title: 'needle' }, b, { id: 'C', title: 'standalone', annotation: { conclusion: 'needle' } }];
+  const roots = buildForest(nodes, { branches: true, query: 'needle' });
+  assert.deepEqual(roots.map(n => n.id), ['C']);
+  assert.equal(roots[0].selfMatch, true); assert.equal(roots[0].matchText, 'needle');
+  const match = buildForest([a, b], { query: 'child' })[0];
+  assert.equal(match.selfMatch, false); assert.equal(match.matches, true); assert.equal(match.children[0].selfMatch, true);
+});
