@@ -5,11 +5,12 @@ const $ = id => document.getElementById(id);
 const previous = vscode.getState() || {};
 const state = { nodes: [], selectedId: '', workspacePaths: [], branches: previous.branches ?? true,
   query: previous.query || '', archived: previous.archived || false, agents: previous.agents || false,
-  workspace: previous.workspace || false, collapsed: new Set(previous.collapsed || []) };
+  workspace: previous.workspace || false, showRemoved: previous.showRemoved || false, collapsed: new Set(previous.collapsed || []) };
+const changingVisibility = new Set();
 let hoverTimer, activeHover, renderKey = '', edgeFrame, editing, savingAnnotation = false;
 const effortNames = { minimal: '极低', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高', ultra: 'Ultra' };
 const relationNames = { root: '起始会话', fork: '分支', agent: '子代理', unknown: '关系未知' };
-function save() { const { branches, query, archived, agents, workspace, collapsed } = state; vscode.setState({ branches, query, archived, agents, workspace, collapsed: [...collapsed] }); }
+function save() { const { branches, query, archived, agents, workspace, showRemoved, collapsed } = state; vscode.setState({ branches, query, archived, agents, workspace, showRemoved, collapsed: [...collapsed] }); }
 function element(tag, cls, text) { const el = document.createElement(tag); if (cls) el.className = cls; if (text !== undefined) el.textContent = text; return el; }
 function date(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '未记录'; }
 function displayTitle(item) { return item.annotation?.alias || item.title; }
@@ -28,6 +29,8 @@ function showTooltip(item, button) {
       const row = element('div', 'tooltip-row'); row.append(element('span', 'tooltip-label', label), element('span', 'tooltip-value', value)); tooltip.append(row);
     }
     if (item.annotation?.note) tooltip.append(element('div', 'tooltip-note tooltip-annotation', item.annotation.note));
+    if (item.removed) tooltip.append(element('div', 'tooltip-note', '此节点已从会话树移除，可点击恢复按钮重新显示。会话本身仍然保留。'));
+    if (item.removedParent) tooltip.append(element('div', 'tooltip-note', '父节点已从会话树移除，此节点单独显示。'));
     tooltip.append(element('div', 'tooltip-note', '模型与强度来自最近保存的元数据。' + (item.relation === 'unknown' ? ' 原始分支记录缺失，未推断父子关系。' : '') + (!item.available ? ' 本地历史记录不可用。' : '')));
     tooltip.hidden = false;
     const rect = button.getBoundingClientRect();
@@ -41,6 +44,7 @@ function makeBranch(item) {
   const button = element('button', 'node'); button.type = 'button'; button.dataset.id = item.id;
   button.classList.toggle('selected', item.id === state.selectedId);
   button.classList.toggle('context', item.contextOnly || !!item.missing);
+  button.classList.toggle('removed', !!item.removed);
   button.classList.toggle('has-children', item.children.length > 0);
   button.setAttribute('aria-label', `${displayTitle(item)}，${(item.annotation?.tags || []).join('，')}，${relationNames[item.relation]}，${item.model || '模型未记录'}，${item.effort || '强度未记录'}。点击切换会话`);
   button.setAttribute('aria-describedby', 'tooltip');
@@ -54,6 +58,8 @@ function makeBranch(item) {
   const meta = element('span', 'node-meta');
   meta.append(element('i', 'dot'), element('span', 'node-kind', item.missing ? '记录缺失' : relationNames[item.relation]));
   if (item.archived) meta.append(element('span', '', '· 已归档'));
+  if (item.removed) meta.append(element('span', '', '· 已移除'));
+  if (item.removedParent) meta.append(element('span', '', '· 父节点已移除'));
   meta.append(element('span', '', `· ${item.id.slice(0, 8)}`));
   if (item.annotation?.note) { const icon = element('span', 'node-note-icon', '▤'); icon.setAttribute('aria-label', '含备注'); meta.append(icon); }
   button.append(meta);
@@ -71,6 +77,15 @@ function makeBranch(item) {
   const edit = element('button', 'node-edit', '✎'); edit.type = 'button'; edit.dataset.id = item.id;
   edit.title = '编辑别名、标签与备注'; edit.setAttribute('aria-label', `编辑 ${displayTitle(item)} 的别名、标签与备注`);
   edit.addEventListener('click', () => openEditor(item)); wrap.append(edit);
+  const remove = element('button', 'node-remove', item.removed ? '↶' : '×'); remove.type = 'button'; remove.dataset.id = item.id;
+  remove.title = item.removed ? '恢复节点' : '从会话树移除（保留会话）';
+  remove.setAttribute('aria-label', `${item.removed ? '恢复' : '移除'} ${displayTitle(item)} 的节点`);
+  remove.disabled = changingVisibility.has(item.id);
+  remove.addEventListener('click', () => {
+    hideTooltip(); changingVisibility.add(item.id); remove.disabled = true; showError('');
+    $('status').textContent = item.removed ? '正在恢复节点…' : '正在移除节点…';
+    vscode.postMessage({ type: 'setNodeRemoved', id: item.id, dataHome: state.dataHome, removed: !item.removed });
+  }); wrap.append(remove);
   if (item.children.length) {
     const closed = state.collapsed.has(item.id);
     const toggle = element('button', 'collapse', closed ? '+' : '−');
@@ -166,7 +181,7 @@ $('annotation-form').addEventListener('submit', event => {
     tags: [...document.querySelectorAll('[name="node-tag"]:checked')].map(box => box.value)
   } });
 });
-for (const name of ['workspace', 'archived', 'agents']) {
+for (const name of ['workspace', 'archived', 'agents', 'showRemoved']) {
   $(name).checked = state[name];
   $(name).addEventListener('change', () => { state[name] = $(name).checked; save(); render(); });
 }
@@ -182,6 +197,7 @@ window.addEventListener('message', event => {
   if (data.type === 'data') {
     state.nodes = data.nodes; state.selectedId = data.selectedId; state.workspacePaths = data.workspacePaths || [];
     const nextHome = data.environment?.dataHome;
+    if (state.dataHome !== nextHome) changingVisibility.clear();
     if (editing && editing.dataHome !== nextHome) { editorBusy(false); closeEditor(); }
     state.dataHome = nextHome;
     state.platform = data.environment?.platform;
@@ -196,9 +212,21 @@ window.addEventListener('message', event => {
     $('status').textContent = `更新于 ${new Date(data.scannedAt).toLocaleTimeString('zh-CN', { hour12: false })}`;
     showError((data.warnings || []).join('\n'));
   } else if (data.type === 'dataUnavailable') {
+    changingVisibility.clear();
     editorBusy(false); closeEditor(); state.dataHome = undefined;
     state.nodes = []; renderKey = ''; $('environment').hidden = true; render();
     $('count').textContent = '当前环境的会话数据不可用'; $('empty').hidden = true;
+  } else if (data.type === 'nodeVisibilityUpdated' || data.type === 'nodeVisibilityError') {
+    if (state.dataHome !== data.dataHome) return;
+    changingVisibility.delete(data.id);
+    if (data.type === 'nodeVisibilityUpdated') {
+      const item = state.nodes.find(node => node.id === data.id);
+      if (item) item.removed = data.removed;
+      $('status').textContent = data.removed ? '节点已从会话树移除，会话仍保留' : '节点已恢复';
+    } else {
+      showError(data.message); $('status').textContent = '操作未完成';
+    }
+    renderKey = ''; render();
   } else if (data.type === 'annotationSaved' || data.type === 'annotationUpdated') {
     if (state.dataHome === data.dataHome) {
       const item = state.nodes.find(node => node.id === data.id);

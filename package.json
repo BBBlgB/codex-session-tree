@@ -2,7 +2,7 @@
   "name": "codex-session-tree",
   "displayName": "Codex 会话树",
   "description": "查看 Codex 会话分支关系，悬停查看模型与强度，点击节点切换会话。",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "local-tools",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/BBBlgB/codex-session-tree.git" },

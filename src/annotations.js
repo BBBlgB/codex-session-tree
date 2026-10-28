@@ -5,11 +5,19 @@ const { normalizedPath } = require('../media/graph');
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const TAGS = ['进行中', '已完成', '待验证'];
 
-function annotationKey(environment, id) {
+function nodeKey(environment, id, namespace) {
   if (!UUID.test(id)) throw new Error('无效的会话 ID');
   const home = normalizedPath(environment.dataHome, environment.platform);
   const scope = createHash('sha256').update(home).digest('hex');
-  return `nodeAnnotation.v1.${scope}.${id}`;
+  return `${namespace}.v1.${scope}.${id}`;
+}
+
+function annotationKey(environment, id) { return nodeKey(environment, id, 'nodeAnnotation'); }
+function removalKey(environment, id) { return nodeKey(environment, id, 'nodeRemoved'); }
+
+async function writeNodeRemoved(storage, environment, id, removed) {
+  if (typeof removed !== 'boolean') throw new Error('节点移除状态格式无效。');
+  await storage.update(removalKey(environment, id), removed ? true : undefined);
 }
 
 function normalizeAnnotation(value) {
@@ -34,7 +42,10 @@ async function writeAnnotation(storage, environment, id, value) {
 }
 
 function annotateSnapshot(storage, snapshot) {
-  return { ...snapshot, nodes: snapshot.nodes.map(item => ({ ...item, annotation: readAnnotation(storage, snapshot.environment, item.id) })) };
+  return { ...snapshot, nodes: snapshot.nodes.map(item => ({ ...item,
+    annotation: readAnnotation(storage, snapshot.environment, item.id),
+    removed: storage.get(removalKey(snapshot.environment, item.id)) === true
+  })) };
 }
 
-module.exports = { annotationKey, normalizeAnnotation, readAnnotation, writeAnnotation, annotateSnapshot };
+module.exports = { annotationKey, removalKey, writeNodeRemoved, normalizeAnnotation, readAnnotation, writeAnnotation, annotateSnapshot };

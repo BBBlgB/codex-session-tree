@@ -19,7 +19,12 @@ async function run() {
         const fixture=${JSON.stringify({ type: 'data', ...data, workspacePaths: ['/example/project'] })};
         window.acquireVsCodeApi=()=>({getState:()=>({}),setState:()=>{},postMessage:m=>{
           window.messages.push(m);
-          if(m.type==='ready')setTimeout(()=>window.postMessage({...fixture,nodes:fixture.nodes.map(n=>({...n,annotation:JSON.parse(localStorage.getItem(n.id)||'null')}))},'*'),10);
+          if(m.type==='ready')setTimeout(()=>window.postMessage({...fixture,nodes:fixture.nodes.map(n=>({...n,annotation:JSON.parse(localStorage.getItem(n.id)||'null'),removed:localStorage.getItem('removed:'+n.id)==='true'}))},'*'),10);
+          if(m.type==='setNodeRemoved')setTimeout(()=>{
+            if(window.rejectVisibility){window.postMessage({type:'nodeVisibilityError',id:m.id,dataHome:m.dataHome,message:'模拟移除存储失败'},'*');return;}
+            if(m.removed)localStorage.setItem('removed:'+m.id,'true');else localStorage.removeItem('removed:'+m.id);
+            window.postMessage({type:'nodeVisibilityUpdated',id:m.id,removed:m.removed,dataHome:m.dataHome},'*');
+          },10);
           if(m.type==='saveAnnotation')setTimeout(()=>{
             if(window.rejectSave){window.postMessage({type:'annotationError',id:m.id,message:'模拟存储失败'},'*');return;}
             localStorage.setItem(m.id,JSON.stringify(m.annotation));
@@ -104,6 +109,46 @@ async function run() {
     await page.screenshot({ path: path.join(root, 'artifacts/demo-annotations.png') });
     await page.reload(); await page.waitForSelector('.node');
     assert.equal(await card.locator('.node-title').innerText(), '方案 A · 等待评审');
+    const removeChild = page.locator(`.node-remove[data-id="${child.id}"]`);
+    const parentCard = page.locator(`button.node[data-id="${child.parentId}"]`);
+    const removeParent = page.locator(`.node-remove[data-id="${child.parentId}"]`);
+    const navigationCount = await page.evaluate(() => window.messages.filter(m => m.type === 'open').length);
+    await page.evaluate(() => { window.rejectVisibility = true; });
+    await removeChild.click(); await page.locator('#error').waitFor({ state: 'visible' });
+    assert.equal(await card.count(), 1); assert.equal(await removeChild.isEnabled(), true);
+    assert.ok((await page.locator('#error').innerText()).includes('模拟移除存储失败'));
+    await page.evaluate(() => { window.rejectVisibility = false; });
+    await removeChild.click(); await card.waitFor({ state: 'detached' });
+    assert.equal(await parentCard.count(), 1, 'Removing a leaf must keep the parent visible in branch mode');
+    assert.equal(await page.evaluate(() => window.messages.filter(m => m.type === 'open').length), navigationCount);
+    await page.reload(); await parentCard.waitFor();
+    assert.equal(await card.count(), 0, 'Removed nodes must stay removed after reload');
+    await page.locator('#search').fill('方案 A · 等待评审');
+    assert.equal(await page.locator('.node').count(), 0, 'Search must not resurrect removed nodes');
+    await page.locator('#search').fill(''); await page.locator('#showRemoved').check();
+    await card.waitFor(); assert.ok((await card.getAttribute('class')).includes('removed'));
+    assert.equal(await card.locator('.node-title').innerText(), '方案 A · 等待评审');
+    assert.equal(await card.locator('.node-tag').count(), 2);
+    await page.setViewportSize({ width: 340, height: 760 });
+    const editButtonBox = await edit.boundingBox(), removeButtonBox = await removeChild.boundingBox();
+    assert.ok(editButtonBox.x + editButtonBox.width <= removeButtonBox.x);
+    assert.ok(removeButtonBox.x + removeButtonBox.width <= 340);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+    await page.screenshot({ path: path.join(root, 'artifacts/demo-removed-nodes.png') });
+    await removeChild.click(); await page.waitForSelector(`button.node[data-id="${child.id}"]:not(.removed)`);
+    await page.locator('#showRemoved').uncheck();
+    await removeParent.click(); await parentCard.waitFor({ state: 'detached' });
+    assert.equal(await card.count(), 1, 'Removing a parent must keep its children visible');
+    assert.ok((await card.innerText()).includes('父节点已移除'));
+    assert.equal(await page.locator('.branch[data-parent]').count(), 0);
+    // Responses for another Codex data source cannot change this view.
+    await page.evaluate(id => window.postMessage({ type: 'nodeVisibilityUpdated', id, removed: true, dataHome: '/other/.codex' }, '*'), child.id);
+    await page.locator('#showRemoved').check(); await parentCard.waitFor();
+    assert.equal(await card.locator('.node-title').innerText(), '方案 A · 等待评审');
+    await removeParent.click(); await page.waitForSelector(`button.node[data-id="${child.parentId}"]:not(.removed)`);
+    await page.locator('#showRemoved').uncheck();
+    assert.equal(await card.locator('.node-tag').count(), 2);
+    await page.setViewportSize({ width: 1100, height: 850 });
     await page.locator('#search').fill('核对边界条件'); assert.equal(await page.locator('.family').count(), 1);
     await edit.click();
     assert.equal(await page.locator('#node-note').inputValue(), '用于讨论接口。\n核对边界条件后再继续。');
@@ -137,7 +182,7 @@ async function run() {
     await page.waitForFunction(() => document.querySelectorAll('.node').length === 0);
     assert.equal(await page.locator('#environment').isVisible(), false);
     assert.deepEqual(errors, []);
-    console.log('Browser: tree/navigation regressions, alias/tags/multiline notes, save/reload, cancel/clear, storage failure recovery, live refresh, search, narrow editor and text escaping passed.');
+    console.log('Browser: navigation, annotations, removal/reload/restore, surviving parents and children, storage failures, source isolation, narrow layout, search and text escaping passed.');
   } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }
 }
 run().catch(error => { console.error(error); process.exitCode = 1; });

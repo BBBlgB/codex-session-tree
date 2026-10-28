@@ -9,6 +9,7 @@ const { createRequire } = require('node:module');
 function createHost(name, remoteName, storage = { get: () => undefined, update: async () => {} }) {
   const panels = [], commands = new Map(), subscriptions = [];
   const disposable = { dispose() {} };
+  let viewProvider;
   const media = path.resolve(__dirname, '..');
   const vscode = {
     workspace: { name, workspaceFolders: [], onDidChangeConfiguration: () => disposable,
@@ -18,9 +19,9 @@ function createHost(name, remoteName, storage = { get: () => undefined, update: 
     commands: { registerCommand: (id, callback) => { commands.set(id, callback); return disposable; } },
     window: {
       createOutputChannel: () => ({ ...disposable, appendLine() {} }),
-      registerWebviewViewProvider: () => disposable,
+      registerWebviewViewProvider: (id, provider) => { viewProvider = provider; return disposable; },
       createWebviewPanel: (kind, title) => {
-        const panel = { title, visible: true, reveal() {}, dispose() {}, onDidDispose: () => disposable,
+        const panel = { title, visible: true, reveal() {}, dispose() {}, onDidDispose: () => disposable, onDidChangeVisibility: () => disposable,
           messages: [], webview: { cspSource: 'https://example.invalid', asWebviewUri: uri => ({ toString: () => uri.fsPath }),
             onDidReceiveMessage: listener => { panel.receive = listener; return disposable; }, postMessage(message) { panel.messages.push(message); return Promise.resolve(true); } } };
         panels.push(panel); return panel;
@@ -37,7 +38,11 @@ function createHost(name, remoteName, storage = { get: () => undefined, update: 
   const context = { subscriptions, extensionUri: { fsPath: media }, extensionPath: media,
     workspaceState: { get: () => '', update: async () => {} }, globalState: storage };
   const api = module.exports.activate(context);
-  return { panels, commands, api };
+  return { panels, commands, api, createSidebar() {
+    const sidebar = vscode.window.createWebviewPanel('sidebar', 'sidebar');
+    viewProvider.resolveWebviewView(sidebar);
+    return sidebar;
+  } };
 }
 
 test('the open command creates a graph only in the window where the user invoked it', () => {
@@ -85,4 +90,50 @@ test('save rejects stale sources and invalid nodes, and reports disk failure to 
   await host.panels[0].receive(request);
   assert.equal(writes, 1); assert.equal(host.panels[0].messages.at(-1).message, 'disk unavailable');
   assert.equal(host.api.getSnapshot().nodes[0].annotation.alias, '');
+});
+
+test('node removal and restoration sync both views and survive refresh and workspace changes', async () => {
+  const records = new Map();
+  const storage = { get: key => records.get(key), update: async (key, value) => {
+    if (value === undefined) records.delete(key); else records.set(key, value);
+  } };
+  const host = createHost('project', undefined, storage);
+  host.commands.get('codexSessionTree.openHere')();
+  const sidebar = host.createSidebar();
+  await host.api.refresh(true);
+  const before = structuredClone(host.api.getSnapshot()); const target = before.nodes[0];
+  const request = { type: 'setNodeRemoved', id: target.id, dataHome: before.environment.dataHome, removed: true };
+  await sidebar.receive(request);
+  for (const view of host.panels) {
+    assert.equal(view.messages.at(-1).type, 'nodeVisibilityUpdated');
+    assert.equal(view.messages.at(-1).removed, true);
+  }
+  assert.equal(host.api.getSnapshot().nodes.length, before.nodes.length);
+  assert.equal(host.api.getSnapshot().nodes[0].title, target.title);
+  assert.equal(host.api.getSnapshot().nodes[0].removed, true);
+  assert.equal(records.size, 1);
+  await host.api.refresh(true);
+  assert.equal(host.api.getSnapshot().nodes[0].removed, true);
+  const reopened = createHost('another-project', undefined, storage); await reopened.api.refresh(true);
+  assert.equal(reopened.api.getSnapshot().nodes[0].removed, true);
+  await sidebar.receive({ ...request, removed: false });
+  assert.equal(host.api.getSnapshot().nodes[0].removed, false); assert.equal(records.size, 0);
+});
+
+test('node removal rejects stale sources and unknown nodes and reports failed writes without hiding', async () => {
+  let writes = 0;
+  const host = createHost('project', undefined, { get: () => undefined, update: async () => { writes++; throw new Error('disk unavailable'); } });
+  host.commands.get('codexSessionTree.openHere')(); await host.api.refresh(true);
+  const snapshot = host.api.getSnapshot();
+  const request = { type: 'setNodeRemoved', id: snapshot.nodes[0].id, dataHome: snapshot.environment.dataHome, removed: true };
+  const view = host.panels[0];
+  for (const invalid of [{ ...request, dataHome: '/wrong-home' }, { ...request, id: 'unknown' }, { ...request, removed: 'yes' }]) {
+    await view.receive(invalid);
+    assert.equal(view.messages.at(-1).type, 'nodeVisibilityError');
+  }
+  assert.equal(writes, 0);
+  await view.receive(request);
+  assert.equal(writes, 1); assert.equal(view.messages.at(-1).type, 'nodeVisibilityError');
+  assert.equal(view.messages.at(-1).message, 'disk unavailable');
+  assert.equal(host.api.getSnapshot().nodes[0].removed, false);
 });

@@ -33,6 +33,36 @@ test('alias, tags, and multiline notes participate in search while retaining the
     assert.equal(roots[0].children[0].title, 'child');
   }
 });
+
+test('removing a parent never restores it as context or removes its surviving children', () => {
+  const nodes = [{ ...a, removed: true, archived: true }, b];
+  const roots = buildForest(nodes, { branches: true });
+  assert.equal(roots.length, 1); assert.equal(roots[0].id, 'B');
+  assert.equal(roots[0].removedParent, true); assert.equal(roots[0].size, 1);
+  assert.equal(buildForest(nodes, { query: 'parent' }).length, 0);
+  const shown = buildForest(nodes, { branches: true, showRemoved: true });
+  assert.equal(shown[0].id, 'A'); assert.equal(shown[0].removed, true);
+  assert.equal(shown[0].children[0].id, 'B');
+});
+
+test('removing an intermediate node does not invent a direct ancestor-to-child edge', () => {
+  const nodes = [a, { ...b, removed: true }, { id: 'C', parentId: 'B', title: 'grandchild' }];
+  const original = structuredClone(nodes);
+  const roots = buildForest(nodes, { branches: true });
+  assert.deepEqual(roots.map(node => node.id).sort(), ['A', 'C']);
+  assert.ok(roots.every(node => node.children.length === 0));
+  assert.equal(roots.find(node => node.id === 'C').parentId, 'B');
+  assert.deepEqual(nodes, original);
+});
+
+test('removing a leaf keeps the parent visible in branch mode and restoring reconnects it', () => {
+  const nodes = [a, { ...b, removed: true }];
+  const roots = buildForest(nodes, { branches: true });
+  assert.equal(roots.length, 1); assert.equal(roots[0].id, 'A'); assert.equal(roots[0].size, 1);
+  assert.equal(buildForest(nodes, { branches: true, query: 'child' }).length, 0);
+  assert.equal(buildForest(nodes.map(node => ({ ...node, removed: false })), { branches: true })[0].size, 2);
+  assert.equal(buildForest(nodes.map(node => ({ ...node, removed: true }))).length, 0);
+});
 test('navigation resolves and preserves the target window before opening Codex', async () => {
   const calls = [];
   const resolved = { path: `/local/${id}`, query: 'windowId=target-window', toString: () => `vscode-insiders://openai.chatgpt/local/${id}?windowId=target-window` };

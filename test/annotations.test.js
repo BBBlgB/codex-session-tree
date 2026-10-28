@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { annotationKey, normalizeAnnotation, readAnnotation, writeAnnotation, annotateSnapshot } = require('../src/annotations');
+const { annotationKey, removalKey, writeNodeRemoved, normalizeAnnotation, readAnnotation, writeAnnotation, annotateSnapshot } = require('../src/annotations');
 const id = '11111111-1111-4111-8111-111111111111';
 const environment = { platform: 'win32', dataHome: 'D:\\Data\\.codex' };
 function memory(initial = {}) {
@@ -42,4 +42,27 @@ test('invalid input and storage failures never produce successful saves', async 
   assert.throws(() => normalizeAnnotation({ ...empty, note: {} }), /格式/);
   await assert.rejects(() => writeAnnotation(memory(), environment, '../../settings', empty), /无效/);
   await assert.rejects(() => writeAnnotation({ update: async () => { throw new Error('disk unavailable'); } }, environment, id, empty), /disk unavailable/);
+});
+
+test('node removal persists in plugin storage without changing sessions or annotations', async () => {
+  const storage = memory();
+  const snapshot = { environment, nodes: [{ id, title: '原主题', parentId: null, available: true }] };
+  const original = structuredClone(snapshot);
+  await writeAnnotation(storage, environment, id, { alias: '保留别名', tags: ['待验证'], note: '保留备注' });
+  await writeNodeRemoved(storage, environment, id, true);
+  const reloaded = memory(JSON.parse(JSON.stringify(Object.fromEntries(storage.data))));
+  assert.equal(annotateSnapshot(reloaded, snapshot).nodes[0].removed, true);
+  assert.equal(annotateSnapshot(reloaded, { ...snapshot, environment: { ...environment, dataHome: 'd:/data/.codex/' } }).nodes[0].removed, true);
+  assert.equal(annotateSnapshot(reloaded, { ...snapshot, environment: { ...environment, dataHome: 'D:\\Other\\.codex' } }).nodes[0].removed, false);
+  await writeNodeRemoved(reloaded, environment, id, false);
+  assert.equal(reloaded.data.has(removalKey(environment, id)), false);
+  assert.equal(annotateSnapshot(reloaded, snapshot).nodes[0].removed, false);
+  assert.equal(readAnnotation(reloaded, environment, id).alias, '保留别名');
+  assert.deepEqual(snapshot, original);
+});
+
+test('node removal rejects invalid messages and propagates storage failures', async () => {
+  await assert.rejects(() => writeNodeRemoved(memory(), environment, id, 'true'), /格式/);
+  await assert.rejects(() => writeNodeRemoved(memory(), environment, '../session', true), /无效/);
+  await assert.rejects(() => writeNodeRemoved({ update: async () => { throw new Error('disk unavailable'); } }, environment, id, true), /disk unavailable/);
 });

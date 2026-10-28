@@ -7,7 +7,7 @@ const crypto = require('node:crypto');
 const { execFile } = require('node:child_process');
 const { openSession } = require('./navigation');
 const { resolveRuntime, describeEnvironment } = require('./runtime');
-const { annotateSnapshot, writeAnnotation } = require('./annotations');
+const { annotateSnapshot, writeAnnotation, writeNodeRemoved } = require('./annotations');
 
 function scan(extensionPath) {
   const config = vscode.workspace.getConfiguration('codexSessionTree');
@@ -74,6 +74,13 @@ function activate(context) {
         if (message.type === 'ready' || message.type === 'refresh') await refresh(true);
         else if (message.type === 'openPanel') await vscode.commands.executeCommand('codexSessionTree.openHere');
         else if (message.type === 'settings') await vscode.commands.executeCommand('codexSessionTree.settings');
+        else if (message.type === 'setNodeRemoved') {
+          const item = snapshot?.nodes.find(node => node.id === message.id);
+          if (!item || message.dataHome !== snapshot.environment.dataHome) throw new Error('会话数据来源已变化，请刷新后重试。');
+          await writeNodeRemoved(context.globalState, snapshot.environment, item.id, message.removed);
+          if (snapshot?.environment.dataHome === message.dataHome) snapshot = annotateSnapshot(context.globalState, snapshot);
+          send({ type: 'nodeVisibilityUpdated', id: item.id, removed: message.removed, dataHome: message.dataHome });
+        }
         else if (message.type === 'saveAnnotation') {
           const item = snapshot?.nodes.find(node => node.id === message.id);
           // Keep a form bound to the data source it was opened from, even if
@@ -96,6 +103,7 @@ function activate(context) {
         }
       } catch (error) {
         if (message?.type === 'saveAnnotation') void surface.webview.postMessage({ type: 'annotationError', id: message.id, message: error.message });
+        else if (message?.type === 'setNodeRemoved') void surface.webview.postMessage({ type: 'nodeVisibilityError', id: message.id, dataHome: message.dataHome, message: error.message });
         else report(error);
       }
     });
